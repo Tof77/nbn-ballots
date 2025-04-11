@@ -2,7 +2,7 @@
   "framework": "nextjs",
   "buildCommand": "next build",
   "devCommand": "next dev",
-  "installCommand": "npm install --legacy-peer-deps",
+  "installCommand": "pnpm install --no-frozen-lockfile",
   "regions": ["fra1"],
   "functions": {
     "app/api/extract-votes/route.ts": {
