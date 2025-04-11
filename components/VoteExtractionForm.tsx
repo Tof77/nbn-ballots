@@ -180,6 +180,7 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
               <SelectValue placeholder="-- Sélectionner --" />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="Buildwise/E088/089">E088/089</SelectItem>
               <SelectItem value="gd3://prod/Committee/id=642369">Buildwise-SECO/E033</SelectItem>
               <SelectItem value="gd3://prod/Committee/id=642112">Buildwise-SECO/E125</SelectItem>
               <SelectItem value="gd3://prod/Committee/id=642050">Buildwise-SECO/E250/25001</SelectItem>
@@ -193,7 +194,6 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
               <SelectItem value="gd3://prod/Committee/id=6161612">Buildwise-SECO/E25011</SelectItem>
               <SelectItem value="gd3://prod/Committee/id=642046">Buildwise-SECO/E254</SelectItem>
               <SelectItem value="gd3://prod/Committee/id=642288">Buildwise/E067</SelectItem>
-              <SelectItem value="Buildwise/E088/089">E088/089</SelectItem>
               <SelectItem value="gd3://prod/Committee/id=642133">Buildwise/E126</SelectItem>
               <SelectItem value="gd3://prod/Committee/id=642135">Buildwise/E128</SelectItem>
               <SelectItem value="gd3://prod/Committee/id=642106">Buildwise/E139</SelectItem>
