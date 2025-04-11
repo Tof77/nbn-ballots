@@ -56,8 +56,12 @@ export default function ResultsDisplay({ results }: ResultsDisplayProps) {
   )
 
   const sortedResults = [...filteredResults].sort((a, b) => {
-    if (a[sortField] < b[sortField]) return sortDirection === "asc" ? -1 : 1
-    if (a[sortField] > b[sortField]) return sortDirection === "asc" ? 1 : -1
+    // Vérifier si les propriétés existent avant de les comparer
+    const aValue = a[sortField] || ""
+    const bValue = b[sortField] || ""
+
+    if (aValue < bValue) return sortDirection === "asc" ? -1 : 1
+    if (aValue > bValue) return sortDirection === "asc" ? 1 : -1
     return 0
   })
 
