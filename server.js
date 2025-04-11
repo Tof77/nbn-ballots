@@ -76,8 +76,9 @@ app.post("/api/extract-votes", async (req, res) => {
 
     // Lancer Puppeteer pour l'extraction
     console.log("Lancement de Puppeteer...")
+
+    // Avec l'image Docker, nous n'avons pas besoin de spécifier des arguments spéciaux
     const browser = await puppeteer.launch({
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
       headless: true,
     })
 
@@ -88,6 +89,9 @@ app.post("/api/extract-votes", async (req, res) => {
       console.log("Navigation vers isolutions.iso.org...")
       await page.goto("https://isolutions.iso.org/eballot/app/", { waitUntil: "networkidle2" })
 
+      // Prendre une capture d'écran pour le débogage
+      await page.screenshot({ path: "/tmp/login-page.png" })
+
       // Se connecter
       console.log("Tentative de connexion...")
       await page.type('input[name="username"]', username)
@@ -95,6 +99,9 @@ app.post("/api/extract-votes", async (req, res) => {
 
       // Cliquer sur le bouton de connexion et attendre la navigation
       await Promise.all([page.click('button[type="submit"]'), page.waitForNavigation({ waitUntil: "networkidle2" })])
+
+      // Prendre une capture d'écran après la connexion
+      await page.screenshot({ path: "/tmp/after-login.png" })
 
       // Vérifier si la connexion a réussi
       const isLoggedIn = await page.evaluate(() => {
@@ -126,6 +133,9 @@ app.post("/api/extract-votes", async (req, res) => {
       // Lancer la recherche
       console.log("Lancement de la recherche...")
       await Promise.all([page.click('button[type="submit"]'), page.waitForNavigation({ waitUntil: "networkidle2" })])
+
+      // Prendre une capture d'écran des résultats
+      await page.screenshot({ path: "/tmp/search-results.png" })
 
       // Attendre que le tableau des résultats soit chargé
       await page.waitForSelector("table.ballotList", { timeout: 10000 }).catch(() => {
