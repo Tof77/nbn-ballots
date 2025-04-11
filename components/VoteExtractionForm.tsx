@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Loader2, LockOpenIcon as LockClosedIcon, ShieldIcon } from "lucide-react"
+import { Loader2, ShieldIcon } from "lucide-react"
 import { encryptCredentials } from "@/utils/encryption"
 
 interface VoteExtractionFormProps {
@@ -107,7 +107,6 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
 
           <div className="space-y-2">
             <Label htmlFor="username" className="flex items-center">
-              <LockClosedIcon className="h-4 w-4 mr-1" />
               Identifiant ISO
             </Label>
             <Input
@@ -122,7 +121,6 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
           </div>
           <div className="space-y-2">
             <Label htmlFor="password" className="flex items-center">
-              <LockClosedIcon className="h-4 w-4 mr-1" />
               Mot de passe ISO
             </Label>
             <Input
