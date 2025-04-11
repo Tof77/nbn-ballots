@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
-import puppeteer from "puppeteer-core"
+import { chromium } from "playwright-core"
 
 // Fonction pour déchiffrer les données simulées
 function simulateDecryption(encryptedData: string): string {
@@ -16,58 +16,18 @@ function simulateDecryption(encryptedData: string): string {
   }
 }
 
-// Fonction pour journaliser les données reçues (sans les identifiants sensibles)
-function logRequestData(data: any) {
-  const sanitizedData = {
-    ...data,
-    credentials: data.credentials
-      ? {
-          encryptedUsername: "***HIDDEN***",
-          encryptedPassword: "***HIDDEN***",
-        }
-      : undefined,
-  }
-  console.log("API - Données reçues:", JSON.stringify(sanitizedData, null, 2))
-  return sanitizedData
+export const config = {
+  runtime: "nodejs",
+  maxDuration: 60, // 60 secondes
 }
 
 export async function POST(req: NextRequest) {
   try {
-    // Récupérer et journaliser les données brutes
-    const requestText = await req.text()
-    console.log("API - Données brutes reçues:", requestText)
-
-    // Parser les données JSON
-    let requestData
-    try {
-      requestData = JSON.parse(requestText)
-    } catch (error) {
-      console.error("API - Erreur lors du parsing JSON:", error)
-      return NextResponse.json(
-        {
-          error: "Format de données invalide",
-          details: "Les données reçues ne sont pas un JSON valide",
-          receivedData: requestText.substring(0, 100) + "...", // Afficher les 100 premiers caractères
-        },
-        { status: 400 },
-      )
-    }
-
-    // Journaliser les données reçues (sans les identifiants sensibles)
-    const sanitizedData = logRequestData(requestData)
-
-    const { commissionId, startDate, extractDetails = true, credentials } = requestData
+    const { commissionId, startDate, extractDetails = true, credentials } = await req.json()
 
     // Vérifier que les identifiants chiffrés sont fournis
     if (!credentials || !credentials.encryptedUsername || !credentials.encryptedPassword) {
-      console.error("API - Identifiants chiffrés manquants")
-      return NextResponse.json(
-        {
-          error: "Identifiants chiffrés manquants",
-          receivedData: sanitizedData,
-        },
-        { status: 400 },
-      )
+      return NextResponse.json({ error: "Identifiants chiffrés manquants" }, { status: 400 })
     }
 
     let username, password
@@ -88,44 +48,32 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    console.log("API - Connexion à isolutions.iso.org avec Puppeteer...")
-
-    // Utiliser le chemin de Edge depuis les variables d'environnement ou utiliser un chemin par défaut
-    const edgePath = process.env.EDGE_PATH || "/usr/bin/microsoft-edge"
-    console.log("API - Chemin du navigateur:", edgePath)
+    console.log("API - Connexion à isolutions.iso.org avec Playwright...")
 
     // Lancer le navigateur
-    const browser = await puppeteer.launch({
-      executablePath: edgePath,
-      headless: "new",
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    const browser = await chromium.launch({
+      headless: true,
     })
 
     try {
-      console.log("API - Navigateur lancé avec succès")
-      const page = await browser.newPage()
-
-      // Configurer la taille de la fenêtre
-      await page.setViewport({ width: 1280, height: 800 })
+      const context = await browser.newContext()
+      const page = await context.newPage()
 
       // Naviguer vers la page de connexion
       console.log("API - Navigation vers la page de connexion...")
-      await page.goto("https://isolutions.iso.org/eballot/app/", { waitUntil: "networkidle2" })
+      await page.goto("https://isolutions.iso.org/eballot/app/")
 
       // Attendre que la page de connexion soit chargée
-      await page.waitForSelector('input[name="username"]', { timeout: 30000 })
+      await page.waitForSelector('input[name="username"]')
       console.log("API - Page de connexion chargée")
 
       // Remplir le formulaire de connexion
-      await page.type('input[name="username"]', username)
-      await page.type('input[name="password"]', password)
+      await page.fill('input[name="username"]', username)
+      await page.fill('input[name="password"]', password)
       console.log("API - Identifiants saisis")
 
       // Soumettre le formulaire
-      await Promise.all([
-        page.click('button[type="submit"]'),
-        page.waitForNavigation({ waitUntil: "networkidle2", timeout: 60000 }),
-      ])
+      await Promise.all([page.click('button[type="submit"]'), page.waitForNavigation()])
       console.log("API - Connexion réussie")
 
       // Vérifier si la connexion a réussi
@@ -139,12 +87,12 @@ export async function POST(req: NextRequest) {
 
       // Naviguer vers la page de recherche des votes
       console.log("API - Navigation vers la page de recherche des votes...")
-      await page.goto("https://isolutions.iso.org/eballot/app/", { waitUntil: "networkidle2" })
+      await page.goto("https://isolutions.iso.org/eballot/app/")
 
       // Sélectionner la commission
       if (commissionId) {
         console.log("API - Sélection de la commission:", commissionId)
-        await page.select('select[name="committee"]', commissionId)
+        await page.selectOption('select[name="committee"]', commissionId)
       }
 
       // Définir la date de début si fournie
@@ -161,10 +109,7 @@ export async function POST(req: NextRequest) {
 
       // Cliquer sur le bouton de recherche
       console.log("API - Lancement de la recherche...")
-      await Promise.all([
-        page.click('button[type="submit"]'),
-        page.waitForNavigation({ waitUntil: "networkidle2", timeout: 30000 }),
-      ])
+      await Promise.all([page.click('button[type="submit"]'), page.waitForNavigation()])
 
       // Extraire les résultats
       console.log("API - Extraction des résultats...")
@@ -212,10 +157,7 @@ export async function POST(req: NextRequest) {
           console.log(`API - Extraction des détails pour le vote ${i + 1}/${votes.length}: ${vote.ref}`)
 
           // Cliquer sur le lien du vote pour accéder aux détails
-          await page.goto(`https://isolutions.iso.org/eballot/app/ballot/${vote.id}`, {
-            waitUntil: "networkidle2",
-            timeout: 30000,
-          })
+          await page.goto(`https://isolutions.iso.org/eballot/app/ballot/${vote.id}`)
 
           // Extraire les détails du vote
           const voteDetails = await page.evaluate(() => {
