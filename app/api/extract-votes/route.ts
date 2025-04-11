@@ -5,6 +5,33 @@ export const runtime = "nodejs"
 // Définir la durée maximale d'exécution à 60 secondes
 export const maxDuration = 60
 
+// Fonction pour déchiffrer les données simulées (déplacée en dehors du bloc)
+function simulateDecryption(encryptedData: string): string {
+  try {
+    // Décodage base64 et vérification du préfixe "demo:"
+    const decoded = atob(encryptedData)
+    if (!decoded.startsWith("demo:")) {
+      throw new Error("Format de données invalide")
+    }
+    return decoded.substring(5) // Enlever le préfixe "demo:"
+  } catch (error) {
+    console.error("API - Erreur lors du déchiffrement simulé:", error)
+    throw new Error("Échec du déchiffrement des données")
+  }
+}
+
+// Fonction pour extraire le code de commission (déplacée en dehors du bloc)
+function extractCommissionCode(commissionId: string): string {
+  // Rechercher un pattern comme E088/089, E123, etc.
+  if (commissionId.includes("Buildwise/E")) {
+    const parts = commissionId.split("/")
+    return parts[parts.length - 1]
+  } else if (commissionId.includes("E")) {
+    return commissionId
+  }
+  return "Unknown"
+}
+
 export async function POST(req: NextRequest) {
   try {
     // Récupérer et journaliser les données brutes
@@ -98,36 +125,6 @@ export async function POST(req: NextRequest) {
     }
 
     // Si l'API Render n'est pas disponible ou si une erreur s'est produite, utiliser les données simulées
-    // Code de fallback avec les données simulées (comme dans la version précédente)
-    // ...
-
-    // Fonction pour déchiffrer les données simulées
-    function simulateDecryption(encryptedData: string): string {
-      try {
-        // Décodage base64 et vérification du préfixe "demo:"
-        const decoded = atob(encryptedData)
-        if (!decoded.startsWith("demo:")) {
-          throw new Error("Format de données invalide")
-        }
-        return decoded.substring(5) // Enlever le préfixe "demo:"
-      } catch (error) {
-        console.error("API - Erreur lors du déchiffrement simulé:", error)
-        throw new Error("Échec du déchiffrement des données")
-      }
-    }
-
-    // Fonction pour extraire le code de commission (ex: E088/089)
-    function extractCommissionCode(commissionId: string): string {
-      // Rechercher un pattern comme E088/089, E123, etc.
-      if (commissionId.includes("Buildwise/E")) {
-        const parts = commissionId.split("/")
-        return parts[parts.length - 1]
-      } else if (commissionId.includes("E")) {
-        return commissionId
-      }
-      return "Unknown"
-    }
-
     const { commissionId, startDate, extractDetails = true, credentials } = requestData
 
     // Vérifier que les identifiants chiffrés sont fournis
