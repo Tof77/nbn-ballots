@@ -56,6 +56,11 @@ function extractCommissionCode(commissionId: string): string {
   return "Unknown"
 }
 
+// Assurez-vous que le fichier est correctement nommé et placé dans le bon répertoire
+// Le nom du fichier doit être exactement "route.ts" (pas "route.vercel.ts" ou autre)
+// Le chemin complet doit être "app/api/extract-votes/route.ts"
+
+// Vérifiez que l'export de la fonction POST est correctement défini
 export async function POST(req: NextRequest) {
   try {
     // Récupérer et journaliser les données brutes
