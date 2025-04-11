@@ -5,7 +5,7 @@ export function middleware(request: NextRequest) {
   // Vérifier si la requête est pour l'API d'extraction des votes
   if (request.nextUrl.pathname === "/api/extract-votes") {
     // Rediriger vers la bonne implémentation en fonction de l'environnement
-    if (process.env.VERCEL) {
+    if (process.env.VERCEL === "1") {
       // Sur Vercel, utiliser l'implémentation Edge
       const url = request.nextUrl.clone()
       url.pathname = "/api/extract-votes-edge"
