@@ -27,6 +27,12 @@ export async function encryptData(data: string, publicKey: string): Promise<stri
   return encrypted
 }
 
+// Cette fonction simule le chiffrement pour le mode de démonstration
+export async function simulateEncryption(text: string): Promise<string> {
+  // Simple encodage en base64 pour simuler le chiffrement
+  return btoa(`demo:${text}`)
+}
+
 // Cette fonction chiffre les identifiants pour l'API
 export async function encryptCredentials(
   username: string,
@@ -36,10 +42,9 @@ export async function encryptCredentials(
   encryptedPassword: string
 }> {
   try {
-    const publicKey = await getPublicKey()
-
-    const encryptedUsername = await encryptData(username, publicKey)
-    const encryptedPassword = await encryptData(password, publicKey)
+    // Pour le déploiement de démonstration, utiliser un chiffrement simulé
+    const encryptedUsername = await simulateEncryption(username)
+    const encryptedPassword = await simulateEncryption(password)
 
     return {
       encryptedUsername,
