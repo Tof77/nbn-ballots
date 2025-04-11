@@ -8,6 +8,8 @@ const nextConfig = {
   env: {
     RENDER_API_URL: process.env.RENDER_API_URL,
   },
+  // Ajout de la configuration pour le dossier src
+  pageExtensions: ['js', 'jsx', 'ts', 'tsx'],
 }
 
 export default nextConfig
