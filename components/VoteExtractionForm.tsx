@@ -180,7 +180,7 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
               <SelectValue placeholder="-- Sélectionner --" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="Buildwise/E088/089">E088/089</SelectItem>
+              <SelectItem value="gd3://prod/Committee/id=642234">Buildwise/E088/089</SelectItem>
               <SelectItem value="gd3://prod/Committee/id=642369">Buildwise-SECO/E033</SelectItem>
               <SelectItem value="gd3://prod/Committee/id=642112">Buildwise-SECO/E125</SelectItem>
               <SelectItem value="gd3://prod/Committee/id=642050">Buildwise-SECO/E250/25001</SelectItem>
