@@ -5,6 +5,30 @@ export const runtime = "nodejs"
 // Définir la durée maximale d'exécution à 60 secondes
 export const maxDuration = 60
 
+// Définir les interfaces pour les types de données
+interface VoteDetail {
+  participant: string
+  vote: string
+  castBy: string
+  date: string
+}
+
+interface Vote {
+  id: string
+  ref: string
+  title: string
+  committee: string
+  votes: string
+  result: string
+  status: string
+  openingDate: string
+  closingDate: string
+  role: string
+  sourceType: string
+  source: string
+  voteDetails?: VoteDetail[] // Propriété optionnelle pour les détails des votes
+}
+
 // Fonction pour déchiffrer les données simulées (déplacée en dehors du bloc)
 function simulateDecryption(encryptedData: string): string {
   try {
@@ -166,14 +190,14 @@ export async function POST(req: NextRequest) {
     console.log(`API - Utilisateur: ${username}, Commission: ${commissionId}, Date: ${startDate}`)
 
     // Générer des données réalistes basées sur la capture d'écran fournie
-    const votes = []
+    const votes: Vote[] = []
 
     // Si la commission est E088/089, utiliser les données de la capture d'écran
     if (commissionCode === "E088/089") {
       console.log("API - Génération de données pour E088/089 basées sur la capture d'écran")
 
       // Données extraites de la capture d'écran
-      const realVotes = [
+      const realVotes: Vote[] = [
         {
           id: "e088-1",
           ref: "ISO/DIS 21239",
@@ -187,6 +211,7 @@ export async function POST(req: NextRequest) {
           role: "Ballot owner",
           sourceType: "ISO/DIS",
           source: "ISO/TC 163/SC 3",
+          voteDetails: [],
         },
         {
           id: "e088-2",
@@ -201,6 +226,7 @@ export async function POST(req: NextRequest) {
           role: "Ballot owner",
           sourceType: "CEN/CENENQ",
           source: "CEN/TC 89",
+          voteDetails: [],
         },
         {
           id: "e088-3",
@@ -215,6 +241,7 @@ export async function POST(req: NextRequest) {
           role: "Ballot owner",
           sourceType: "ISO/DIS",
           source: "ISO/TC 163/SC 2",
+          voteDetails: [],
         },
         {
           id: "e088-4",
@@ -229,6 +256,7 @@ export async function POST(req: NextRequest) {
           role: "Ballot owner",
           sourceType: "CEN/CENFV",
           source: "CEN/TC 89",
+          voteDetails: [],
         },
         {
           id: "e088-5",
@@ -243,6 +271,7 @@ export async function POST(req: NextRequest) {
           role: "Ballot owner",
           sourceType: "CEN/CIB-NWI",
           source: "CEN/TC 88",
+          voteDetails: [],
         },
         {
           id: "e088-6",
@@ -257,6 +286,7 @@ export async function POST(req: NextRequest) {
           role: "Ballot owner",
           sourceType: "CEN/CIB-NWI",
           source: "CEN/TC 88",
+          voteDetails: [],
         },
         {
           id: "e088-7",
@@ -271,6 +301,7 @@ export async function POST(req: NextRequest) {
           role: "Ballot owner",
           sourceType: "CEN/CENCIB",
           source: "CEN/TC 88",
+          voteDetails: [],
         },
         {
           id: "e088-8",
@@ -285,6 +316,7 @@ export async function POST(req: NextRequest) {
           role: "Ballot owner",
           sourceType: "CEN/CENCIB",
           source: "CEN/TC 88",
+          voteDetails: [],
         },
         {
           id: "e088-9",
@@ -299,6 +331,7 @@ export async function POST(req: NextRequest) {
           role: "Ballot owner",
           sourceType: "ISO/CIB",
           source: "ISO/TC 205",
+          voteDetails: [],
         },
         {
           id: "e088-10",
@@ -313,6 +346,7 @@ export async function POST(req: NextRequest) {
           role: "Ballot owner",
           sourceType: "",
           source: "",
+          voteDetails: [],
         },
       ]
 
@@ -358,7 +392,7 @@ export async function POST(req: NextRequest) {
         const openingDate = new Date(closingDate)
         openingDate.setDate(openingDate.getDate() - 30)
 
-        const vote = {
+        const vote: Vote = {
           id: `${commissionCode.toLowerCase().replace("/", "-")}-${i + 1}`,
           ref: `prEN ${1000 + i}`,
           title: `Standard for ${commissionCode} - Part ${i + 1}`,
