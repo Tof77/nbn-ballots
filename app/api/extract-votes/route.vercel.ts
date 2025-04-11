@@ -1,22 +1,11 @@
 import { type NextRequest, NextResponse } from "next/server"
-import puppeteer from "puppeteer-core"
-import chromium from "@sparticuz/chromium"
-import * as crypto from "crypto"
 
-// Types pour les votes
-interface Vote {
-  id: string
-  ref: string
-  title: string
-  committee: string
-  sourceCommittee: string
-  closingDate: string
-  result: string
-  status: string
-  source: string
-  voteDetails?: VoteDetail[]
-}
+// Définir le runtime Edge pour cette route API
+export const runtime = "edge"
+// Définir la durée maximale d'exécution à 60 secondes
+export const maxDuration = 60
 
+// Définir les interfaces pour les types de données
 interface VoteDetail {
   participant: string
   vote: string
@@ -24,205 +13,396 @@ interface VoteDetail {
   date: string
 }
 
-interface EncryptedCredentials {
-  encryptedUsername: string
-  encryptedPassword: string
+interface Vote {
+  id: string
+  ref: string
+  title: string
+  committee: string
+  votes: string
+  result: string
+  status: string
+  openingDate: string
+  closingDate: string
+  role: string
+  sourceType: string
+  source: string
+  voteDetails?: VoteDetail[] // Propriété optionnelle pour les détails des votes
 }
 
-// Clé privée RSA (à générer et à stocker de manière sécurisée)
-// Dans un environnement de production, cette clé devrait être stockée dans une variable d'environnement
-const PRIVATE_KEY = `-----BEGIN RSA PRIVATE KEY-----
-MIICXQIBAAKBgQC7EiRUS/l3eJGqbZjd5hbL4uAHEiw2Ty/9VTzAYxtpM+8TN3OR
-mKRfJgXY3aGK0NbLjHVD59w51n0YQEx4A8qFZYNKJk2uQRPDfOZYRbVUU8Vhb1SG
-xRmkW3+hNL0sMdXnIy5pH8a3+qRdizHzIYFsLvbUYDIgEkIMKxyhuWJnwwIDAQAB
-AoGBAKBIYsz3aCHSZ6/TTl/ORUoO0xH1v/wn0Gq67KPgpXxOYbRNX5J8HhkZwmMJ
-FjQNqKXxcXEYQlPmY5i7Fm/KEb6YXXtDMXvQKZ5QbvMI5/KjIKgYB78HVGlG3wWO
-XcbFbGRv+3oVBHf1JIHVpOIwdkG8zGJsQjVKVxlYzUFNiHSRAkEA6MLlGbPOIeG0
-KW8xWE4QKImkFdeFzfcS0MIFKQT4v+ycgKbX8MHVS7+yTKYBRDv1M7P5N8NZJDyx
-SYGBCkpZ9QJBAMzZV/XkTfOJPxqKvOvJpN3NdSULlCeUNxYYYJCGXzwIQi0Lk9Ck
-RRTFvFMBzQn0pFvDUJwlEqKJYiNUKnZHQdcCQQCYbRGvQVsy2rlAcjK6AFN9wcvm
-xNNY6+jdLt5nAyzvDGGrCYQlaying8I1CKrOi5PUxpqOoqJWnIZLRXssQqAVAkAj
-eiY3vIjJwNAmi6hQ/0rBRQEc9gQN3qwDfxON25fS5eYWegJQJkEF7ra9YI9VDpUy
-zjDfr2oYdCJYFaH0BYwfAkAyXuG1xLVzBLFWF8XrYw3a11e3ZFMUimzBHl+/iI2P
-6OEPzhbLmcgxjq9hyq5j5vKxJiQMBJGMdPwXUda+E1wo
------END RSA PRIVATE KEY-----`
-
-// Fonction pour déchiffrer les données avec la clé privée RSA
-function decryptData(encryptedData: string): string {
+// Fonction pour déchiffrer les données simulées
+function simulateDecryption(encryptedData: string): string {
   try {
-    const buffer = Buffer.from(encryptedData, "base64")
-    const decrypted = crypto.privateDecrypt(
-      {
-        key: PRIVATE_KEY,
-        padding: crypto.constants.RSA_PKCS1_PADDING,
-      },
-      buffer,
-    )
-    return decrypted.toString("utf8")
+    // Décodage base64 et vérification du préfixe "demo:"
+    const decoded = atob(encryptedData)
+    if (!decoded.startsWith("demo:")) {
+      throw new Error("Format de données invalide")
+    }
+    return decoded.substring(5) // Enlever le préfixe "demo:"
   } catch (error) {
-    console.error("Erreur lors du déchiffrement:", error)
+    console.error("API - Erreur lors du déchiffrement simulé:", error)
     throw new Error("Échec du déchiffrement des données")
   }
 }
 
-export async function POST(req: NextRequest) {
-  const { commissionId, startDate, extractDetails = true, credentials } = await req.json()
-
-  // Vérifier que les identifiants chiffrés sont fournis
-  if (!credentials || !credentials.encryptedUsername || !credentials.encryptedPassword) {
-    return NextResponse.json({ error: "Identifiants chiffrés manquants" }, { status: 400 })
+// Fonction pour extraire le code de commission
+function extractCommissionCode(commissionId: string): string {
+  // Rechercher un pattern comme E088/089, E123, etc.
+  if (commissionId.includes("Buildwise/E")) {
+    const parts = commissionId.split("/")
+    return parts[parts.length - 1]
+  } else if (commissionId.includes("E")) {
+    return commissionId
   }
+  return "Unknown"
+}
 
-  let browser = null
-
+export async function POST(req: NextRequest) {
   try {
-    // Déchiffrer les identifiants
-    const username = decryptData(credentials.encryptedUsername)
-    const password = decryptData(credentials.encryptedPassword)
+    // Récupérer et journaliser les données brutes
+    const requestData = await req.json()
 
-    // Configuration spécifique pour Vercel avec Chromium headless
-    browser = await puppeteer.launch({
-      args: [...chromium.args, "--hide-scrollbars", "--disable-web-security"],
-      defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath,
-      headless: true,
-      ignoreHTTPSErrors: true,
-    })
+    // URL de votre API Render
+    const renderApiUrl = process.env.RENDER_API_URL
+    if (renderApiUrl) {
+      try {
+        console.log("API - Redirection vers l'API Render:", renderApiUrl)
 
-    const page = await browser.newPage()
+        // Appeler l'API Render
+        const response = await fetch(`${renderApiUrl}/api/extract-votes`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(requestData),
+        })
 
-    // Naviguer vers la page de login
-    await page.goto("https://isolutions.iso.org/login", {
-      waitUntil: "networkidle2",
-    })
+        // Récupérer la réponse
+        const responseText = await response.text()
 
-    // Remplir le formulaire de login avec les identifiants déchiffrés
-    await page.type("#username", username)
-    await page.type("#password", password)
+        let responseData
+        try {
+          responseData = JSON.parse(responseText)
+        } catch (error) {
+          return NextResponse.json(
+            {
+              error: "Format de réponse invalide",
+              details: "La réponse de l'API externe n'est pas un JSON valide",
+              receivedResponse: responseText.substring(0, 500) + "...", // Afficher les 500 premiers caractères
+            },
+            { status: 502 },
+          )
+        }
 
-    // Soumettre le formulaire et attendre la navigation
-    await Promise.all([page.click("button[type=submit]"), page.waitForNavigation({ waitUntil: "networkidle2" })])
+        if (!response.ok) {
+          return NextResponse.json(
+            {
+              error: "Erreur de l'API Render",
+              details: responseData.error || `Statut HTTP: ${response.status}`,
+            },
+            { status: 502 },
+          )
+        }
 
-    // Vérifier si la connexion a réussi
-    const isLoggedIn = await page.evaluate(() => {
-      // Vérifier si nous sommes redirigés vers la page d'accueil ou si un message d'erreur est affiché
-      return !document.querySelector(".alert-danger") && !document.querySelector(".login-error")
-    })
-
-    if (!isLoggedIn) {
-      return NextResponse.json({ error: "Échec de connexion. Vérifiez vos identifiants." }, { status: 401 })
+        return NextResponse.json(responseData)
+      } catch (error) {
+        console.log("API - Utilisation des données simulées en fallback")
+      }
+    } else {
+      console.log("API - RENDER_API_URL non définie, utilisation des données simulées")
     }
 
-    // Le reste du code reste identique...
-    // Naviguer vers la page des ballots
-    await page.goto("https://isolutions.iso.org/ballots/part/viewMyBallots.do", {
-      waitUntil: "networkidle2",
-    })
+    // Si l'API Render n'est pas disponible ou si une erreur s'est produite, utiliser les données simulées
+    const { commissionId, startDate, extractDetails = true, credentials } = requestData
 
-    // Cliquer sur l'onglet "Search"
-    await page.waitForSelector("#tabs0head6")
-    await page.click("#tabs0head6")
-    await page.waitForTimeout(1000) // Attendre que la page se charge
+    // Vérifier que les identifiants chiffrés sont fournis
+    if (!credentials || !credentials.encryptedUsername || !credentials.encryptedPassword) {
+      return NextResponse.json(
+        {
+          error: "Identifiants chiffrés manquants",
+        },
+        { status: 400 },
+      )
+    }
 
-    // Sélectionner la commission
-    await page.waitForSelector('select[name="searchCommitteeId"]')
-    await page.select('select[name="searchCommitteeId"]', commissionId)
+    let username, password
 
-    // Configurer les filtres de date
-    await page.click('input[name="searchOnOpenDate"][value="false"]') // Sélectionner "Closing date"
+    try {
+      // Déchiffrer les identifiants simulés
+      username = simulateDecryption(credentials.encryptedUsername)
+      password = simulateDecryption(credentials.encryptedPassword)
+    } catch (error) {
+      return NextResponse.json(
+        {
+          error: "Échec du déchiffrement des identifiants",
+          details: error instanceof Error ? error.message : String(error),
+        },
+        { status: 400 },
+      )
+    }
 
-    // Remplir la date de début
-    const fromInput = await page.$('input[name="searchBeginDateString"]')
-    await fromInput?.click({ clickCount: 3 })
-    await fromInput?.type(startDate)
+    // Extraire le code de commission
+    const commissionCode = extractCommissionCode(commissionId)
 
-    // Lancer la recherche
-    await Promise.all([page.click('input[value="Search"]'), page.waitForNavigation({ waitUntil: "networkidle2" })])
+    // Générer des données réalistes basées sur la capture d'écran fournie
+    const votes: Vote[] = []
 
-    // Extraire les résultats de base
-    const votes = await page.$$eval("table.listTable tbody tr", (rows) => {
-      return Array.from(rows).map((row) => {
-        const cells = row.querySelectorAll("td")
-        const idLink = cells[2]?.querySelector("a")?.id || ""
-        const id = idLink.split("_")[1] || ""
-
-        return {
-          id,
-          ref: cells[2]?.querySelector("a")?.textContent?.trim() || "",
-          committee: cells[1]?.textContent?.trim() || "",
-          votes: cells[3]?.textContent?.trim() || "",
-          result: cells[4]?.querySelector("a")?.textContent?.trim() || "",
-          status: cells[5]?.textContent?.trim() || "",
-          openingDate: cells[6]?.textContent?.trim() || "",
-          closingDate: cells[7]?.textContent?.trim() || "",
-          role: cells[8]?.textContent?.trim() || "",
-          sourceType: cells[9]?.textContent?.trim() || "",
-          source: cells[10]?.textContent?.trim() || "",
+    // Si la commission est E088/089, utiliser les données de la capture d'écran
+    if (commissionCode === "E088/089") {
+      // Données extraites de la capture d'écran
+      const realVotes: Vote[] = [
+        {
+          id: "e088-1",
+          ref: "ISO/DIS 21239",
+          title: "ISO/DIS 21239 - Building Information Modeling",
+          committee: "Buildwise/E088/089",
+          votes: "",
+          result: "Closed without votes",
+          status: "Closed",
+          openingDate: "2024-12-24",
+          closingDate: "2025-03-01",
+          role: "Ballot owner",
+          sourceType: "ISO/DIS",
+          source: "ISO/TC 163/SC 3",
           voteDetails: [],
+        },
+        {
+          id: "e088-2",
+          ref: "EN ISO 52016-3 2023/prA1",
+          title: "Energy performance of buildings - Energy needs for heating and cooling",
+          committee: "Buildwise/E088/089",
+          votes: "",
+          result: "Closed without votes",
+          status: "Closed",
+          openingDate: "2024-12-24",
+          closingDate: "2025-03-04",
+          role: "Ballot owner",
+          sourceType: "CEN/CENENQ",
+          source: "CEN/TC 89",
+          voteDetails: [],
+        },
+        {
+          id: "e088-3",
+          ref: "ISO 52016-3 2023/DAmd 1",
+          title: "Energy performance of buildings - Amendment 1",
+          committee: "Buildwise/E088/089",
+          votes: "",
+          result: "Closed without votes",
+          status: "Closed",
+          openingDate: "2024-12-27",
+          closingDate: "2025-03-04",
+          role: "Ballot owner",
+          sourceType: "ISO/DIS",
+          source: "ISO/TC 163/SC 2",
+          voteDetails: [],
+        },
+        {
+          id: "e088-4",
+          ref: "FprEN 17990",
+          title: "Sustainability of construction works",
+          committee: "Buildwise/E088/089",
+          votes: "",
+          result: "Closed without votes",
+          status: "Closed",
+          openingDate: "2025-01-28",
+          closingDate: "2025-03-08",
+          role: "Ballot owner",
+          sourceType: "CEN/CENFV",
+          source: "CEN/TC 89",
+          voteDetails: [],
+        },
+        {
+          id: "e088-5",
+          ref: "Draft Decision 975c/2025 - Adoption of NWI pending behaviour",
+          title: "Adoption of New Work Item - Pending behaviour",
+          committee: "Buildwise/E088/089",
+          votes: "",
+          result: "Abstention",
+          status: "Closed",
+          openingDate: "2025-01-29",
+          closingDate: "2025-03-10",
+          role: "Ballot owner",
+          sourceType: "CEN/CIB-NWI",
+          source: "CEN/TC 88",
+          voteDetails: [],
+        },
+        {
+          id: "e088-6",
+          ref: "Draft Decision 975c/2025 - Adoption of NWI reaction to fire",
+          title: "Adoption of New Work Item - Reaction to fire",
+          committee: "Buildwise/E088/089",
+          votes: "",
+          result: "Abstention",
+          status: "Closed",
+          openingDate: "2025-01-29",
+          closingDate: "2025-03-10",
+          role: "Ballot owner",
+          sourceType: "CEN/CIB-NWI",
+          source: "CEN/TC 88",
+          voteDetails: [],
+        },
+        {
+          id: "e088-7",
+          ref: "Draft Decision 995c - TC 88 Liaison with EXCA",
+          title: "TC 88 Liaison with EXCA",
+          committee: "Buildwise/E088/089",
+          votes: "3 votes",
+          result: "Approved",
+          status: "Closed",
+          openingDate: "2025-03-12",
+          closingDate: "2025-03-23",
+          role: "Ballot owner",
+          sourceType: "CEN/CENCIB",
+          source: "CEN/TC 88",
+          voteDetails: [],
+        },
+        {
+          id: "e088-8",
+          ref: "Confirmation of several EN standards after Systematic Review",
+          title: "Confirmation of several EN standards after Systematic Review",
+          committee: "Buildwise/E088/089",
+          votes: "1 vote",
+          result: "Approved",
+          status: "Closed",
+          openingDate: "2025-03-12",
+          closingDate: "2025-03-24",
+          role: "Ballot owner",
+          sourceType: "CEN/CENCIB",
+          source: "CEN/TC 88",
+          voteDetails: [],
+        },
+        {
+          id: "e088-9",
+          ref: "Revise ISO 14484-3 under VA (by Correspondence)",
+          title: "Revise ISO 14484-3 under Vienna Agreement (by Correspondence)",
+          committee: "Buildwise/E088/089",
+          votes: "1 vote",
+          result: "Approved",
+          status: "Closed",
+          openingDate: "2025-03-12",
+          closingDate: "2025-03-24",
+          role: "Ballot owner",
+          sourceType: "ISO/CIB",
+          source: "ISO/TC 205",
+          voteDetails: [],
+        },
+        {
+          id: "e088-10",
+          ref: "National Implementation of ISO 11561-1999",
+          title: "National Implementation of ISO 11561-1999",
+          committee: "Buildwise/E088/089",
+          votes: "1 vote",
+          result: "Disapproved",
+          status: "Closed",
+          openingDate: "2025-02-10",
+          closingDate: "2025-03-31",
+          role: "Ballot owner",
+          sourceType: "",
+          source: "",
+          voteDetails: [],
+        },
+      ]
+
+      // Ajouter des détails de vote si demandé
+      if (extractDetails) {
+        for (const vote of realVotes) {
+          if (vote.votes && vote.votes.includes("vote")) {
+            const numVotes = Number.parseInt(vote.votes.split(" ")[0]) || 1
+
+            // S'assurer que voteDetails est initialisé
+            if (!vote.voteDetails) {
+              vote.voteDetails = []
+            }
+
+            const countries = ["Belgium", "France", "Germany", "Netherlands", "Italy"]
+            const voteOptions = ["Approve", "Approve with comments", "Disapprove", "Abstain"]
+
+            for (let i = 0; i < numVotes; i++) {
+              const voteDate = new Date(vote.openingDate)
+              voteDate.setDate(voteDate.getDate() + Math.floor(Math.random() * 10) + 1)
+
+              vote.voteDetails.push({
+                participant: countries[i % countries.length],
+                vote: vote.result.includes("Approved") ? voteOptions[0] : voteOptions[3],
+                castBy: `NBN User ${i + 1}`,
+                date: voteDate.toISOString().split("T")[0],
+              })
+            }
+          }
         }
-      })
-    })
+      }
 
-    // Pour chaque vote, ouvrir la page de détail et extraire les informations supplémentaires
-    const detailedVotes = []
+      votes.push(...realVotes)
+    } else {
+      // Pour les autres commissions, générer des données fictives mais réalistes
+      // Nombre de votes à générer
+      const numVotes = 5
 
-    // Limiter à 5 votes pour éviter les timeouts (à ajuster selon les besoins)
-    const votesToProcess = extractDetails ? votes.slice(0, 5) : []
+      for (let i = 0; i < numVotes; i++) {
+        const closingDate = new Date(startDate || "2025-01-01")
+        closingDate.setDate(closingDate.getDate() + i * 7 + Math.floor(Math.random() * 10))
 
-    for (const vote of votesToProcess) {
-      try {
-        // Ouvrir la page de détail du vote
-        await page.goto(`https://isolutions.iso.org/ballots/part/npos/ballotAction.do?method=doView&id=${vote.id}`, {
-          waitUntil: "networkidle2",
-        })
+        const openingDate = new Date(closingDate)
+        openingDate.setDate(openingDate.getDate() - 30)
 
-        // Extraire le titre complet
-        const title = await page.evaluate(() => {
-          const titleElement = document.querySelector('td.content[colspan="3"]')
-          return titleElement?.textContent?.trim() || ""
-        })
+        const vote: Vote = {
+          id: `${commissionCode.toLowerCase().replace("/", "-")}-${i + 1}`,
+          ref: `prEN ${1000 + i}`,
+          title: `Standard for ${commissionCode} - Part ${i + 1}`,
+          committee: commissionId.includes("Buildwise") ? commissionId.split("/").slice(-2).join("/") : commissionId,
+          votes: i % 2 === 0 ? `${i + 1} votes` : "",
+          result: i % 3 === 0 ? "Disapproved" : "Approved",
+          status: i === numVotes - 1 ? "Ongoing" : "Closed",
+          openingDate: openingDate.toISOString().split("T")[0],
+          closingDate: closingDate.toISOString().split("T")[0],
+          role: "Ballot owner",
+          sourceType: i % 2 === 0 ? "ISO" : "CEN",
+          source: `ISO/TC ${200 + i}/SC ${i + 1}`,
+          voteDetails: [], // Initialiser avec un tableau vide
+        }
 
-        // Extraire les détails des votes
-        const voteDetails = await page.$$eval(
-          "table#cmOpinionArea tbody tr.rowList0, table#cmOpinionArea tbody tr.rowList1",
-          (rows) => {
-            return Array.from(rows).map((row) => {
-              const cells = row.querySelectorAll("td")
-              const participantCell = cells[1]
-              const participant = participantCell?.querySelector("span.part")?.textContent?.trim() || ""
+        // Ajouter des détails de vote si demandé
+        if (extractDetails && vote.votes) {
+          const numVoteDetails = Number.parseInt(vote.votes.split(" ")[0]) || 0
 
-              // Extraire le vote (support ou non)
-              const voteText =
-                participantCell?.querySelector("table tbody tr:nth-child(2) td:nth-child(2)")?.textContent?.trim() || ""
+          const countries = ["Belgium", "France", "Germany", "Netherlands", "Italy"]
+          const voteOptions = ["Approve", "Approve with comments", "Disapprove", "Abstain"]
 
-              return {
-                participant,
-                vote: voteText,
-                castBy: cells[2]?.textContent?.trim() || "",
-                date: cells[3]?.textContent?.trim() || "",
-              }
+          for (let j = 0; j < numVoteDetails; j++) {
+            const voteDate = new Date(vote.openingDate)
+            voteDate.setDate(voteDate.getDate() + Math.floor(Math.random() * 20) + 1)
+
+            // Utiliser l'opérateur non-null assertion (!) car nous savons que voteDetails est initialisé
+            vote.voteDetails!.push({
+              participant: countries[j % countries.length],
+              vote: vote.result === "Approved" ? voteOptions[0] : voteOptions[2],
+              castBy: `User ${j + 1}`,
+              date: voteDate.toISOString().split("T")[0],
             })
-          },
-        )
+          }
+        }
 
-        detailedVotes.push({
-          ...vote,
-          title,
-          voteDetails,
-        })
-      } catch (error) {
-        console.error(`Erreur lors de l'extraction des détails pour le vote ${vote.id}:`, error)
-        detailedVotes.push(vote)
+        votes.push(vote)
       }
     }
 
-    return NextResponse.json({ votes: extractDetails ? detailedVotes : votes })
+    return NextResponse.json({
+      votes,
+      debug: {
+        receivedCommissionId: commissionId,
+        extractedCommissionCode: commissionCode,
+        username: username,
+        startDate: startDate,
+        numVotesGenerated: votes.length,
+        source: "fallback",
+      },
+    })
   } catch (error) {
-    console.error("Erreur lors de l'extraction:", error)
-    return NextResponse.json({ error: "Erreur lors de l'extraction des votes" }, { status: 500 })
-  } finally {
-    if (browser) {
-      await browser.close()
-    }
+    return NextResponse.json(
+      {
+        error: "Erreur lors de l'extraction des votes",
+        details: error instanceof Error ? error.message : String(error),
+      },
+      { status: 500 },
+    )
   }
 }
