@@ -80,6 +80,7 @@ app.post("/api/extract-votes", async (req, res) => {
     // Avec l'image Docker, nous n'avons pas besoin de spécifier des arguments spéciaux
     const browser = await puppeteer.launch({
       headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
     })
 
     try {
