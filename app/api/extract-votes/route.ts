@@ -355,7 +355,11 @@ export async function POST(req: NextRequest) {
         for (const vote of realVotes) {
           if (vote.votes && vote.votes.includes("vote")) {
             const numVotes = Number.parseInt(vote.votes.split(" ")[0]) || 1
-            vote.voteDetails = []
+
+            // S'assurer que voteDetails est initialisé
+            if (!vote.voteDetails) {
+              vote.voteDetails = []
+            }
 
             const countries = ["Belgium", "France", "Germany", "Netherlands", "Italy"]
             const voteOptions = ["Approve", "Approve with comments", "Disapprove", "Abstain"]
@@ -371,8 +375,6 @@ export async function POST(req: NextRequest) {
                 date: voteDate.toISOString().split("T")[0],
               })
             }
-          } else {
-            vote.voteDetails = []
           }
         }
       }
@@ -405,7 +407,7 @@ export async function POST(req: NextRequest) {
           role: "Ballot owner",
           sourceType: i % 2 === 0 ? "ISO" : "CEN",
           source: `ISO/TC ${200 + i}/SC ${i + 1}`,
-          voteDetails: [],
+          voteDetails: [], // Initialiser avec un tableau vide
         }
 
         // Ajouter des détails de vote si demandé
@@ -419,7 +421,8 @@ export async function POST(req: NextRequest) {
             const voteDate = new Date(vote.openingDate)
             voteDate.setDate(voteDate.getDate() + Math.floor(Math.random() * 20) + 1)
 
-            vote.voteDetails.push({
+            // Utiliser l'opérateur non-null assertion (!) car nous savons que voteDetails est initialisé
+            vote.voteDetails!.push({
               participant: countries[j % countries.length],
               vote: vote.result === "Approved" ? voteOptions[0] : voteOptions[2],
               castBy: `User ${j + 1}`,
