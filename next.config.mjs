@@ -1,9 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  experimental: {
-    webpackBuildWorker: true,
-  },
-  // Ajoutez ici d'autres configurations si nécessaire
+  // Suppression de l'option experimental.webpackBuildWorker qui peut causer des problèmes
+  // experimental: {
+  //   webpackBuildWorker: true,
+  // },
 }
 
 export default nextConfig
