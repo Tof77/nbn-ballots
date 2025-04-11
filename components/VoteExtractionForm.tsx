@@ -47,6 +47,8 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
     checkPublicKey()
   }, [])
 
+  // Dans la fonction handleSubmit, ajoutons plus de logs pour le débogage
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
@@ -80,8 +82,23 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
       console.log("Données envoyées à l'API:", debugRequestData)
       setDebugInfo(`Données envoyées à l'API: ${JSON.stringify(debugRequestData, null, 2)}`)
 
-      // Utiliser l'API correcte en fonction de l'environnement
-      const apiUrl = process.env.VERCEL === "1" ? "/api/extract-votes-edge" : "/api/extract-votes"
+      // Utiliser directement l'API sans passer par le middleware pour le débogage
+      const apiUrl = "/api/extract-votes"
+
+      // Ajouter des logs pour le débogage
+      console.log("URL de l'API utilisée:", apiUrl)
+      setDebugInfo((prev) => `${prev}\n\nURL de l'API utilisée: ${apiUrl}`)
+
+      try {
+        // Tester d'abord avec une requête GET à l'API de test
+        const testResponse = await fetch("/api/test")
+        const testText = await testResponse.text()
+        console.log("Test API response:", testText)
+        setDebugInfo((prev) => `${prev}\n\nTest API response: ${testText}`)
+      } catch (testError) {
+        console.error("Erreur lors du test de l'API:", testError)
+        setDebugInfo((prev) => `${prev}\n\nErreur lors du test de l'API: ${testError}`)
+      }
 
       const res = await fetch(apiUrl, {
         method: "POST",
@@ -89,15 +106,25 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
         body: JSON.stringify(requestData),
       })
 
+      // Ajouter des logs pour le débogage
+      console.log("Statut de la réponse:", res.status, res.statusText)
+      setDebugInfo((prev) => `${prev}\n\nStatut de la réponse: ${res.status} ${res.statusText}`)
+
       const responseText = await res.text()
       console.log("Réponse brute de l'API:", responseText)
+      setDebugInfo((prev) => `${prev}\n\nRéponse brute de l'API: ${responseText}`)
 
       let json
       try {
         json = JSON.parse(responseText)
+        console.log("Réponse JSON parsée:", json)
+        setDebugInfo((prev) => `${prev}\n\nRéponse JSON parsée: ${JSON.stringify(json, null, 2)}`)
       } catch (parseError) {
         console.error("Erreur lors du parsing de la réponse JSON:", parseError)
-        setDebugInfo((prev) => `${prev}\n\nRéponse brute de l'API (non-JSON): ${responseText}`)
+        setDebugInfo(
+          (prev) =>
+            `${prev}\n\nErreur lors du parsing de la réponse JSON: ${parseError}\nRéponse brute de l'API (non-JSON): ${responseText}`,
+        )
         throw new Error("La réponse de l'API n'est pas un JSON valide")
       }
 
