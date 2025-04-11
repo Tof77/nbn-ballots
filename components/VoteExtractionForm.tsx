@@ -80,7 +80,10 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
       console.log("Données envoyées à l'API:", debugRequestData)
       setDebugInfo(`Données envoyées à l'API: ${JSON.stringify(debugRequestData, null, 2)}`)
 
-      const res = await fetch("/api/extract-votes", {
+      // Utiliser l'API correcte en fonction de l'environnement
+      const apiUrl = process.env.VERCEL === "1" ? "/api/extract-votes-edge" : "/api/extract-votes"
+
+      const res = await fetch(apiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestData),
@@ -150,6 +153,7 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
               placeholder="Votre identifiant ISO"
               required
               disabled={!publicKeyLoaded || loading}
+              autoComplete="username"
             />
           </div>
           <div className="space-y-2">
@@ -164,6 +168,7 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
               placeholder="Votre mot de passe ISO"
               required
               disabled={!publicKeyLoaded || loading}
+              autoComplete="current-password"
             />
           </div>
           <div className="md:col-span-2">
