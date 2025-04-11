@@ -3,14 +3,12 @@ FROM ghcr.io/puppeteer/puppeteer:latest
 # Définir le répertoire de travail
 WORKDIR /app
 
-# Copier les fichiers package.json et package-lock.json
-COPY package.json ./
+# Copier uniquement les fichiers nécessaires pour l'API
+COPY server.js ./
+COPY api-package.json ./package.json
 
-# Installer les dépendances
+# Installer les dépendances de l'API
 RUN npm install
-
-# Copier le reste des fichiers de l'application
-COPY . .
 
 # Exposer le port sur lequel l'application s'exécutera
 EXPOSE 3000
