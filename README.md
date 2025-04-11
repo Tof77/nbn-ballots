@@ -1,4 +1,4 @@
-# NBN Ballots - Extraction Automatique 
+# NBN Ballots - Extraction Automatique des votes
 
 Application Next.js pour extraire automatiquement les votes depuis isolutions.iso.org.
 
