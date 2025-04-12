@@ -6,22 +6,18 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
-
 .container {
   max-width: 1200px;
   margin: 0 auto;
 }
-
 body {
   font-family: Arial, Helvetica, sans-serif;
 }
-
 @layer utilities {
   .text-balance {
     text-wrap: balance;
   }
 }
-
 @layer base {
   :root {
     --background: 0 0% 100%;
