@@ -42,16 +42,39 @@ function extractCommissionCode(commissionId) {
 
 // Fonction pour capturer le HTML de la page pour le débogage
 async function capturePageHtml(page, path) {
-  const html = await page.content()
-  const fs = require("fs")
-  fs.writeFileSync(path, html)
-  console.log(`HTML capturé et enregistré dans ${path}`)
-  return html
+  try {
+    const html = await page.content().catch((e) => {
+      console.log(`Erreur lors de la capture du HTML: ${e.message}`)
+      return "Erreur lors de la capture du HTML"
+    })
+
+    const fs = require("fs")
+    fs.writeFileSync(path, html)
+    console.log(`HTML capturé et enregistré dans ${path}`)
+    return html
+  } catch (error) {
+    console.error(`Erreur lors de la capture du HTML pour ${path}:`, error)
+    return "Erreur lors de la capture du HTML"
+  }
 }
 
 // Fonction pour attendre un délai (compatible avec toutes les versions de Puppeteer)
 async function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+// Fonction pour attendre que la navigation soit complète
+async function waitForNavigationSafely(page, options = {}) {
+  try {
+    await page.waitForNavigation({
+      waitUntil: "networkidle2",
+      timeout: options.timeout || 30000,
+      ...options,
+    })
+    console.log("Navigation terminée avec succès")
+  } catch (error) {
+    console.log(`Erreur lors de l'attente de la navigation: ${error.message}`)
+  }
 }
 
 // Route principale pour l'extraction des votes
@@ -111,8 +134,8 @@ app.post("/api/extract-votes", async (req, res) => {
       const page = await browser.newPage()
 
       // Configurer les timeouts de navigation
-      page.setDefaultNavigationTimeout(30000)
-      page.setDefaultTimeout(30000)
+      page.setDefaultNavigationTimeout(60000) // Augmenter le timeout à 60 secondes
+      page.setDefaultTimeout(60000)
 
       // Activer la journalisation de la console du navigateur
       page.on("console", (msg) => console.log("Console du navigateur:", msg.text()))
@@ -122,11 +145,24 @@ app.post("/api/extract-votes", async (req, res) => {
         console.error("Erreur de page:", error.message)
       })
 
+      // Intercepter les requêtes réseau pour le débogage
+      page.on("request", (request) => {
+        if (request.resourceType() === "document") {
+          console.log(`Navigation vers: ${request.url()}`)
+        }
+      })
+
+      page.on("response", (response) => {
+        if (response.request().resourceType() === "document") {
+          console.log(`Réponse de: ${response.url()} - Statut: ${response.status()}`)
+        }
+      })
+
       // Naviguer directement vers la page principale d'ISO
       console.log("Navigation vers isolutions.iso.org...")
       await page.goto("https://isolutions.iso.org", {
         waitUntil: "networkidle2",
-        timeout: 30000,
+        timeout: 60000,
       })
 
       // Attendre un peu pour s'assurer que la page est chargée
@@ -148,7 +184,12 @@ app.post("/api/extract-votes", async (req, res) => {
 
         // Prendre une capture d'écran de la page de connexion
         await page.screenshot({ path: "/tmp/login-page.png" })
-        await capturePageHtml(page, "/tmp/login-page.html")
+
+        try {
+          await capturePageHtml(page, "/tmp/login-page.html")
+        } catch (e) {
+          console.log(`Erreur lors de la capture du HTML de la page de connexion: ${e.message}`)
+        }
 
         // Attendre que les champs de connexion soient chargés
         await delay(3000)
@@ -222,16 +263,11 @@ app.post("/api/extract-votes", async (req, res) => {
         // Prendre une capture d'écran avant de cliquer sur le bouton de connexion
         await page.screenshot({ path: "/tmp/before-login-click.png" })
 
-        // Cliquer sur le bouton de connexion
-        await Promise.all([
-          page.click(loginButtonSelector),
-          page.waitForNavigation({ waitUntil: "networkidle2", timeout: 30000 }).catch((e) => {
-            console.log(`Navigation non détectée après connexion: ${e.message}`)
-          }),
-        ])
+        // Cliquer sur le bouton de connexion et attendre la navigation
+        await Promise.all([page.click(loginButtonSelector), waitForNavigationSafely(page, { timeout: 60000 })])
 
         // Attendre un peu pour s'assurer que la page est chargée
-        await delay(5000)
+        await delay(10000) // Augmenter le délai à 10 secondes
       } else {
         console.log("Déjà connecté ou redirection automatique non effectuée")
       }
@@ -256,805 +292,797 @@ app.post("/api/extract-votes", async (req, res) => {
 
       // Naviguer directement vers la page de recherche des votes
       console.log("Navigation vers la page de recherche des votes...")
-      await page.goto(
-        "https://isolutions.iso.org/ballots/part/viewMyBallots.do?method=doSearch&org.apache.struts.taglib.html.CANCEL=true&startIndex=0",
-        {
-          waitUntil: "networkidle2",
-          timeout: 30000,
-        },
-      )
 
-      // Attendre un peu pour s'assurer que la page est chargée
-      await delay(5000)
+      // Utiliser une approche plus robuste pour la navigation
+      try {
+        // Naviguer vers la page de ballots
+        await page.goto("https://isolutions.iso.org/ballots/", {
+          waitUntil: "networkidle2",
+          timeout: 60000,
+        })
+
+        // Attendre que la page soit chargée
+        await delay(10000)
+
+        // Prendre une capture d'écran de la page de ballots
+        await page.screenshot({ path: "/tmp/ballots-page.png" })
+
+        // Naviguer vers la page de recherche
+        await page.goto(
+          "https://isolutions.iso.org/ballots/part/viewMyBallots.do?method=doSearch&org.apache.struts.taglib.html.CANCEL=true&startIndex=0",
+          {
+            waitUntil: "networkidle2",
+            timeout: 60000,
+          },
+        )
+
+        // Attendre que la page soit complètement chargée
+        await delay(15000) // Augmenter le délai à 15 secondes
+      } catch (error) {
+        console.error("Erreur lors de la navigation vers la page de recherche:", error)
+        await page.screenshot({ path: "/tmp/navigation-error.png" })
+        throw new Error(`Erreur lors de la navigation vers la page de recherche: ${error.message}`)
+      }
 
       // Prendre une capture d'écran de la page de recherche
       await page.screenshot({ path: "/tmp/search-page.png" })
-      await capturePageHtml(page, "/tmp/search-page.html")
+
+      try {
+        await capturePageHtml(page, "/tmp/search-page.html")
+      } catch (e) {
+        console.log(`Erreur lors de la capture du HTML de la page de recherche: ${e.message}`)
+      }
 
       // Vérifier si nous sommes sur la page de recherche
-      const pageTitle = await page.title()
+      const pageTitle = await page.title().catch((e) => {
+        console.log(`Erreur lors de la récupération du titre de la page: ${e.message}`)
+        return "Titre inconnu"
+      })
       console.log(`Titre de la page: ${pageTitle}`)
 
       // Capturer l'état de la page avant la sélection de la commission
       await page.screenshot({ path: "/tmp/before-committee-selection.png" })
 
-      // Analyser la structure de la page pour trouver les formulaires et les champs
-      const formInfo = await page.evaluate(() => {
-        // Trouver tous les formulaires sur la page
-        const forms = Array.from(document.querySelectorAll("form"))
-        const formDetails = forms.map((form) => {
-          // Récupérer les informations sur le formulaire
-          const formId = form.id || "no-id"
-          const formName = form.name || "no-name"
-          const formAction = form.action || "no-action"
-          const formMethod = form.method || "no-method"
+      // Vérifier si le sélecteur de commission existe
+      const committeeSelectExists = await page
+        .evaluate(() => {
+          return !!document.querySelector('select[name="searchCommitteeId"]')
+        })
+        .catch((e) => {
+          console.log(`Erreur lors de la vérification du sélecteur de commission: ${e.message}`)
+          return false
+        })
 
-          // Récupérer tous les champs du formulaire
-          const inputs = Array.from(form.querySelectorAll("input, select, textarea"))
-          const inputDetails = inputs.map((input) => {
-            return {
-              type: input.tagName.toLowerCase(),
-              id: input.id || "no-id",
-              name: input.name || "no-name",
-              value: input.value || "no-value",
-              options:
-                input.tagName.toLowerCase() === "select" ? Array.from(input.options).map((opt) => opt.value) : [],
-            }
+      console.log(`Sélecteur de commission existe: ${committeeSelectExists}`)
+
+      if (committeeSelectExists) {
+        // Sélectionner la commission
+        console.log(`Sélection de la commission: ${commissionId}`)
+        await page.select('select[name="searchCommitteeId"]', commissionId).catch((e) => {
+          console.log(`Erreur lors de la sélection de la commission: ${e.message}`)
+        })
+
+        // Prendre une capture d'écran après la sélection de la commission
+        await page.screenshot({ path: "/tmp/after-committee-selection.png" })
+
+        // Définir la date si demandé
+        if (startDate) {
+          console.log(`Définition de la date: ${startDate}`)
+          await page
+            .evaluate((date) => {
+              const dateInput = document.querySelector('input[name="searchBeginDateString"]')
+              if (dateInput) dateInput.value = date
+            }, startDate)
+            .catch((e) => {
+              console.log(`Erreur lors de la définition de la date: ${e.message}`)
+            })
+
+          // Prendre une capture d'écran après la définition de la date
+          await page.screenshot({ path: "/tmp/after-date-setting.png" })
+        }
+
+        // Cliquer sur le bouton de recherche
+        console.log("Clic sur le bouton de recherche")
+        await page.click('input[id="searchBt"]').catch((e) => {
+          console.log(`Erreur lors du clic sur le bouton de recherche: ${e.message}`)
+        })
+
+        // Attendre que la recherche soit terminée
+        await delay(15000) // Attendre 15 secondes pour que les résultats se chargent
+
+        // Prendre une capture d'écran des résultats
+        await page.screenshot({ path: "/tmp/search-results.png" })
+
+        try {
+          await capturePageHtml(page, "/tmp/search-results.html")
+        } catch (e) {
+          console.log(`Erreur lors de la capture du HTML des résultats: ${e.message}`)
+        }
+
+        // Extraire les résultats du tableau
+        console.log("Extraction des résultats...")
+
+        const votes = await page
+          .evaluate(() => {
+            // Trouver le tableau des résultats
+            const table = document.querySelector("table.listTable")
+            if (!table) return []
+
+            // Récupérer les en-têtes
+            const headers = Array.from(table.querySelectorAll("th")).map((th) => th.innerText.trim().toLowerCase())
+
+            // Récupérer les lignes de données
+            const rows = Array.from(table.querySelectorAll("tbody tr"))
+
+            // Extraire les données de chaque ligne
+            return rows
+              .map((row, index) => {
+                const cells = Array.from(row.querySelectorAll("td"))
+                if (cells.length < 3) return null // Ignorer les lignes avec trop peu de cellules
+
+                // Créer un objet pour stocker les données
+                const rowData = {
+                  id: `vote-${index + 1}`,
+                  ref: "",
+                  title: "",
+                  committee: "",
+                  votes: "",
+                  result: "",
+                  status: "",
+                  openingDate: "",
+                  closingDate: "",
+                  role: "",
+                  sourceType: "",
+                  source: "",
+                }
+
+                // Associer les cellules aux en-têtes
+                cells.forEach((cell, i) => {
+                  const header = headers[i] || `column${i}`
+                  const text = cell.innerText.trim()
+                  const link = cell.querySelector("a")
+                  const href = link ? link.href : null
+
+                  // Déterminer le type de données
+                  if (header.includes("ref") || header.includes("reference")) {
+                    rowData.ref = text
+                    rowData.title = link ? link.title || text : text
+                    if (href) rowData.detailsUrl = href
+                  } else if (header.includes("committee")) {
+                    rowData.committee = text
+                  } else if (header.includes("vote")) {
+                    rowData.votes = text
+                  } else if (header.includes("result")) {
+                    rowData.result = text
+                  } else if (header.includes("status")) {
+                    rowData.status = text
+                  } else if (header.includes("opening")) {
+                    rowData.openingDate = text
+                  } else if (header.includes("closing")) {
+                    rowData.closingDate = text
+                  } else if (header.includes("role")) {
+                    rowData.role = text
+                  } else if (header.includes("source") && header.includes("type")) {
+                    rowData.sourceType = text
+                  } else if (header.includes("source") && !header.includes("type")) {
+                    rowData.source = text
+                  }
+                })
+
+                return rowData
+              })
+              .filter(Boolean) // Filtrer les lignes nulles
+          })
+          .catch((e) => {
+            console.log(`Erreur lors de l'extraction des résultats: ${e.message}`)
+            return []
           })
 
-          return {
-            id: formId,
-            name: formName,
-            action: formAction,
-            method: formMethod,
-            inputs: inputDetails,
+        console.log(`${votes.length} votes extraits`)
+
+        // Extraire les détails des votes si demandé
+        if (extractDetails && votes.length > 0) {
+          console.log("Extraction des détails des votes...")
+
+          for (let i = 0; i < votes.length; i++) {
+            const vote = votes[i]
+
+            // Vérifier si le vote a des détails à extraire et une URL de détails
+            if (vote.votes && vote.votes.includes("vote") && vote.detailsUrl) {
+              console.log(`Extraction des détails pour le vote ${i + 1}/${votes.length}: ${vote.ref}`)
+
+              try {
+                // Naviguer vers la page de détails
+                await page.goto(vote.detailsUrl, { waitUntil: "networkidle2", timeout: 30000 }).catch(async (error) => {
+                  console.error(`Erreur lors de la navigation vers les détails du vote ${vote.ref}:`, error)
+                  // Continuer avec le vote suivant
+                  return
+                })
+
+                // Attendre que la page de détails soit chargée
+                await delay(5000)
+
+                // Prendre une capture d'écran de la page de détails
+                await page.screenshot({ path: `/tmp/vote-details-${i}.png` })
+
+                try {
+                  await capturePageHtml(page, `/tmp/vote-details-${i}.html`)
+                } catch (e) {
+                  console.log(`Erreur lors de la capture du HTML des détails: ${e.message}`)
+                }
+
+                // Extraire les détails du vote
+                vote.voteDetails = await page
+                  .evaluate(() => {
+                    // Trouver le tableau des détails
+                    const tables = Array.from(document.querySelectorAll("table"))
+                    let detailsTable = null
+
+                    // Chercher le tableau qui contient les détails des votes
+                    for (const table of tables) {
+                      const headers = Array.from(table.querySelectorAll("th")).map((th) =>
+                        th.innerText.trim().toLowerCase(),
+                      )
+                      if (
+                        headers.some(
+                          (h) =>
+                            h.includes("participant") || h.includes("vote") || h.includes("cast") || h.includes("date"),
+                        )
+                      ) {
+                        detailsTable = table
+                        break
+                      }
+                    }
+
+                    if (!detailsTable) return []
+
+                    // Récupérer les en-têtes
+                    const headers = Array.from(detailsTable.querySelectorAll("th")).map((th) =>
+                      th.innerText.trim().toLowerCase(),
+                    )
+
+                    // Récupérer les lignes de données
+                    const rows = Array.from(detailsTable.querySelectorAll("tbody tr, tr:not(:first-child)"))
+
+                    // Extraire les données de chaque ligne
+                    return rows
+                      .map((row) => {
+                        const cells = Array.from(row.querySelectorAll("td"))
+                        if (cells.length < 3) return null // Ignorer les lignes avec trop peu de cellules
+
+                        // Créer un objet pour stocker les données
+                        const rowData = {
+                          participant: "",
+                          vote: "",
+                          castBy: "",
+                          date: "",
+                        }
+
+                        // Associer les cellules aux en-têtes
+                        cells.forEach((cell, i) => {
+                          const header = headers[i] || `column${i}`
+                          const text = cell.innerText.trim()
+
+                          // Déterminer le type de données
+                          if (header.includes("participant") || header.includes("country")) {
+                            rowData.participant = text
+                          } else if (header.includes("vote")) {
+                            rowData.vote = text
+                          } else if (header.includes("cast") || header.includes("by") || header.includes("user")) {
+                            rowData.castBy = text
+                          } else if (header.includes("date")) {
+                            rowData.date = text
+                          } else if (i === 0) {
+                            // Première colonne, probablement le participant
+                            rowData.participant = text
+                          } else if (i === 1) {
+                            // Deuxième colonne, probablement le vote
+                            rowData.vote = text
+                          } else if (i === 2) {
+                            // Troisième colonne, probablement qui a voté
+                            rowData.castBy = text
+                          } else if (i === 3) {
+                            // Quatrième colonne, probablement la date
+                            rowData.date = text
+                          }
+                        })
+
+                        return rowData
+                      })
+                      .filter(Boolean) // Filtrer les lignes nulles
+                  })
+                  .catch((e) => {
+                    console.log(`Erreur lors de l'extraction des détails: ${e.message}`)
+                    return []
+                  })
+
+                console.log(`${vote.voteDetails.length} détails extraits pour le vote ${vote.ref}`)
+              } catch (error) {
+                console.error(`Erreur lors de l'extraction des détails pour le vote ${vote.ref}:`, error)
+                vote.voteDetails = []
+              }
+
+              // Revenir à la page des résultats
+              try {
+                await page.goto(
+                  "https://isolutions.iso.org/ballots/part/viewMyBallots.do?method=doSearch&org.apache.struts.taglib.html.CANCEL=true&startIndex=0",
+                  {
+                    waitUntil: "networkidle2",
+                    timeout: 30000,
+                  },
+                )
+                await delay(5000)
+              } catch (error) {
+                console.error(`Erreur lors du retour à la page des résultats:`, error)
+              }
+            } else {
+              vote.voteDetails = []
+            }
           }
+        }
+
+        // Fermer le navigateur
+        await browser.close()
+        browser = null
+
+        // Retourner les résultats
+        return res.json({
+          votes,
+          debug: {
+            receivedCommissionId: commissionId,
+            extractedCommissionCode: commissionCode,
+            username: username,
+            startDate: startDate,
+            numVotesGenerated: votes.length,
+          },
         })
+      } else {
+        // Si le sélecteur de commission n'est pas trouvé, essayer d'analyser la structure de la page
+        console.log("Sélecteur de commission non trouvé, analyse de la structure de la page")
 
-        // Trouver tous les éléments qui pourraient être des sélecteurs de commission
-        const possibleCommitteeSelectors = Array.from(document.querySelectorAll("select")).map((select) => {
-          return {
-            id: select.id || "no-id",
-            name: select.name || "no-name",
-            options: Array.from(select.options).map((opt) => ({
-              value: opt.value,
-              text: opt.text,
-            })),
-          }
-        })
+        // Analyser la structure de la page pour trouver les formulaires et les champs
+        const formInfo = await page
+          .evaluate(() => {
+            // Trouver tous les formulaires sur la page
+            const forms = Array.from(document.querySelectorAll("form"))
+            const formDetails = forms.map((form) => {
+              // Récupérer les informations sur le formulaire
+              const formId = form.id || "no-id"
+              const formName = form.name || "no-name"
+              const formAction = form.action || "no-action"
+              const formMethod = form.method || "no-method"
 
-        return {
-          forms: formDetails,
-          possibleCommitteeSelectors,
-          pageText: document.body.innerText.substring(0, 1000), // Premiers 1000 caractères du texte de la page
-        }
-      })
+              // Récupérer tous les champs du formulaire
+              const inputs = Array.from(form.querySelectorAll("input, select, textarea"))
+              const inputDetails = inputs.map((input) => {
+                return {
+                  type: input.tagName.toLowerCase(),
+                  id: input.id || "no-id",
+                  name: input.name || "no-name",
+                  value: input.value || "no-value",
+                  options:
+                    input.tagName.toLowerCase() === "select" ? Array.from(input.options).map((opt) => opt.value) : [],
+                }
+              })
 
-      console.log("Informations sur les formulaires:", JSON.stringify(formInfo, null, 2))
+              return {
+                id: formId,
+                name: formName,
+                action: formAction,
+                method: formMethod,
+                inputs: inputDetails,
+              }
+            })
 
-      // Rechercher un sélecteur de commission dans les informations récupérées
-      let committeeSelector = null
-      const committeeValue = commissionId
+            // Trouver tous les éléments qui pourraient être des sélecteurs de commission
+            const possibleCommitteeSelectors = Array.from(document.querySelectorAll("select")).map((select) => {
+              return {
+                id: select.id || "no-id",
+                name: select.name || "no-name",
+                options: Array.from(select.options).map((opt) => ({
+                  value: opt.value,
+                  text: opt.text,
+                })),
+              }
+            })
 
-      // Vérifier si nous avons trouvé des sélecteurs possibles
-      if (formInfo.possibleCommitteeSelectors && formInfo.possibleCommitteeSelectors.length > 0) {
-        // Parcourir les sélecteurs possibles
-        for (const selector of formInfo.possibleCommitteeSelectors) {
-          // Vérifier si le sélecteur a un nom qui pourrait correspondre à un sélecteur de commission
-          if (
-            selector.name.toLowerCase().includes("committee") ||
-            selector.id.toLowerCase().includes("committee") ||
-            selector.name.toLowerCase().includes("comite") ||
-            selector.id.toLowerCase().includes("comite")
-          ) {
-            committeeSelector = selector.name ? `select[name="${selector.name}"]` : `select#${selector.id}`
-            console.log(`Sélecteur de commission trouvé: ${committeeSelector}`)
-            break
-          }
-        }
+            return {
+              forms: formDetails,
+              possibleCommitteeSelectors,
+              pageText: document.body.innerText.substring(0, 1000), // Premiers 1000 caractères du texte de la page
+            }
+          })
+          .catch((e) => {
+            console.log(`Erreur lors de l'analyse de la structure de la page: ${e.message}`)
+            return { forms: [], possibleCommitteeSelectors: [], pageText: "" }
+          })
 
-        // Si aucun sélecteur n'a été trouvé par nom, prendre le premier sélecteur disponible
-        if (!committeeSelector && formInfo.possibleCommitteeSelectors.length > 0) {
-          const firstSelector = formInfo.possibleCommitteeSelectors[0]
-          committeeSelector = firstSelector.name ? `select[name="${firstSelector.name}"]` : `select#${firstSelector.id}`
-          console.log(
-            `Aucun sélecteur de commission spécifique trouvé, utilisation du premier sélecteur: ${committeeSelector}`,
-          )
-        }
-      }
+        console.log("Informations sur les formulaires:", JSON.stringify(formInfo, null, 2))
 
-      // Si nous n'avons toujours pas de sélecteur, essayer de trouver un champ caché pour la commission
-      if (!committeeSelector) {
-        // Parcourir tous les formulaires et leurs champs
-        for (const form of formInfo.forms) {
-          for (const input of form.inputs) {
-            // Vérifier si le champ a un nom qui pourrait correspondre à un champ de commission
+        // Rechercher un sélecteur de commission dans les informations récupérées
+        let committeeSelector = null
+        const committeeValue = commissionId
+
+        // Vérifier si nous avons trouvé des sélecteurs possibles
+        if (formInfo.possibleCommitteeSelectors && formInfo.possibleCommitteeSelectors.length > 0) {
+          // Parcourir les sélecteurs possibles
+          for (const selector of formInfo.possibleCommitteeSelectors) {
+            // Vérifier si le sélecteur a un nom qui pourrait correspondre à un sélecteur de commission
             if (
-              (input.name.toLowerCase().includes("committee") || input.id.toLowerCase().includes("committee")) &&
-              input.type === "input"
+              selector.name.toLowerCase().includes("committee") ||
+              selector.id.toLowerCase().includes("committee") ||
+              selector.name.toLowerCase().includes("comite") ||
+              selector.id.toLowerCase().includes("comite")
             ) {
-              committeeSelector = input.name ? `input[name="${input.name}"]` : `input#${input.id}`
-              console.log(`Champ de commission trouvé: ${committeeSelector}`)
+              committeeSelector = selector.name ? `select[name="${selector.name}"]` : `select#${selector.id}`
+              console.log(`Sélecteur de commission trouvé: ${committeeSelector}`)
               break
             }
           }
-          if (committeeSelector) break
-        }
-      }
 
-      // Si nous n'avons toujours pas de sélecteur, essayer de trouver un bouton ou un lien pour la commission
-      if (!committeeSelector) {
-        // Rechercher des boutons ou des liens qui pourraient être liés à la sélection de commission
-        const buttonOrLinkInfo = await page.evaluate(() => {
-          const buttons = Array.from(document.querySelectorAll("button, input[type='button'], input[type='submit']"))
-          const buttonDetails = buttons.map((button) => {
-            return {
-              type: button.tagName.toLowerCase(),
-              id: button.id || "no-id",
-              name: button.name || "no-name",
-              value: button.value || "no-value",
-              text: button.innerText || button.value || "no-text",
-            }
-          })
-
-          const links = Array.from(document.querySelectorAll("a"))
-          const linkDetails = links.map((link) => {
-            return {
-              href: link.href || "no-href",
-              id: link.id || "no-id",
-              text: link.innerText || "no-text",
-            }
-          })
-
-          return {
-            buttons: buttonDetails,
-            links: linkDetails,
-          }
-        })
-
-        console.log("Informations sur les boutons et liens:", JSON.stringify(buttonOrLinkInfo, null, 2))
-
-        // Rechercher un bouton ou un lien qui pourrait être lié à la sélection de commission
-        for (const button of buttonOrLinkInfo.buttons) {
-          if (
-            button.text.toLowerCase().includes("committee") ||
-            button.text.toLowerCase().includes("comite") ||
-            button.name.toLowerCase().includes("committee") ||
-            button.id.toLowerCase().includes("committee")
-          ) {
-            console.log(`Bouton de commission trouvé: ${button.text}`)
-            // Cliquer sur le bouton
-            await page.click(
-              button.id !== "no-id"
-                ? `#${button.id}`
-                : button.name !== "no-name"
-                  ? `[name="${button.name}"]`
-                  : `button:contains("${button.text}")`,
-            )
-            await delay(3000)
-            break
-          }
-        }
-
-        for (const link of buttonOrLinkInfo.links) {
-          if (
-            link.text.toLowerCase().includes("committee") ||
-            link.text.toLowerCase().includes("comite") ||
-            link.href.toLowerCase().includes("committee")
-          ) {
-            console.log(`Lien de commission trouvé: ${link.text}`)
-            // Cliquer sur le lien
-            await page.click(link.id !== "no-id" ? `#${link.id}` : `a:contains("${link.text}")`).catch((e) => {
-              console.log(`Erreur lors du clic sur le lien: ${e.message}`)
-            })
-            await delay(3000)
-            break
-          }
-        }
-      }
-
-      // Si nous avons un sélecteur, essayer de sélectionner la commission
-      if (committeeSelector) {
-        console.log(`Tentative de sélection de la commission avec le sélecteur: ${committeeSelector}`)
-
-        // Vérifier si le sélecteur existe sur la page
-        const selectorExists = await page.evaluate((selector) => {
-          return !!document.querySelector(selector)
-        }, committeeSelector)
-
-        if (selectorExists) {
-          // Si c'est un select, utiliser la méthode select
-          if (committeeSelector.startsWith("select")) {
-            await page.select(committeeSelector, committeeValue).catch((e) => {
-              console.log(`Erreur lors de la sélection de la commission: ${e.message}`)
-            })
-          } else {
-            // Sinon, essayer de définir la valeur
-            await page.evaluate(
-              (selector, value) => {
-                const element = document.querySelector(selector)
-                if (element) element.value = value
-              },
-              committeeSelector,
-              committeeValue,
+          // Si aucun sélecteur n'a été trouvé par nom, prendre le premier sélecteur disponible
+          if (!committeeSelector && formInfo.possibleCommitteeSelectors.length > 0) {
+            const firstSelector = formInfo.possibleCommitteeSelectors[0]
+            committeeSelector = firstSelector.name
+              ? `select[name="${firstSelector.name}"]`
+              : `select#${firstSelector.id}`
+            console.log(
+              `Aucun sélecteur de commission spécifique trouvé, utilisation du premier sélecteur: ${committeeSelector}`,
             )
           }
-        } else {
-          console.log(`Le sélecteur ${committeeSelector} n'existe pas sur la page`)
         }
-      } else {
-        console.log("Aucun sélecteur de commission trouvé, tentative de continuer sans sélection de commission")
-      }
 
-      // Définir la date si demandé
-      if (startDate) {
-        console.log(`Définition de la date: ${startDate}`)
-
-        // Rechercher des champs de date
-        const dateFields = await page.evaluate(() => {
-          const inputs = Array.from(document.querySelectorAll("input"))
-          return inputs
-            .filter((input) => {
-              return (
-                input.type === "date" ||
-                input.name.toLowerCase().includes("date") ||
-                input.id.toLowerCase().includes("date") ||
-                input.placeholder?.toLowerCase().includes("date")
-              )
-            })
-            .map((input) => {
-              return {
-                type: input.type,
-                id: input.id || "no-id",
-                name: input.name || "no-name",
-                placeholder: input.placeholder || "no-placeholder",
+        // Si nous n'avons toujours pas de sélecteur, essayer de trouver un champ caché pour la commission
+        if (!committeeSelector) {
+          // Parcourir tous les formulaires et leurs champs
+          for (const form of formInfo.forms) {
+            for (const input of form.inputs) {
+              // Vérifier si le champ a un nom qui pourrait correspondre à un champ de commission
+              if (
+                (input.name.toLowerCase().includes("committee") || input.id.toLowerCase().includes("committee")) &&
+                input.type === "input"
+              ) {
+                committeeSelector = input.name ? `input[name="${input.name}"]` : `input#${input.id}`
+                console.log(`Champ de commission trouvé: ${committeeSelector}`)
+                break
               }
-            })
-        })
-
-        console.log("Champs de date trouvés:", JSON.stringify(dateFields, null, 2))
-
-        // Rechercher un champ de date qui pourrait correspondre à la date de clôture
-        let dateSelector = null
-        for (const field of dateFields) {
-          if (
-            field.name.toLowerCase().includes("closing") ||
-            field.id.toLowerCase().includes("closing") ||
-            field.name.toLowerCase().includes("clos") ||
-            field.id.toLowerCase().includes("clos") ||
-            field.placeholder?.toLowerCase().includes("closing")
-          ) {
-            dateSelector = field.name ? `input[name="${field.name}"]` : `input#${field.id}`
-            console.log(`Champ de date de clôture trouvé: ${dateSelector}`)
-            break
+            }
+            if (committeeSelector) break
           }
         }
 
-        // Si aucun champ spécifique n'a été trouvé, prendre le premier champ de date
-        if (!dateSelector && dateFields.length > 0) {
-          const firstField = dateFields[0]
-          dateSelector = firstField.name ? `input[name="${firstField.name}"]` : `input#${firstField.id}`
-          console.log(`Aucun champ de date spécifique trouvé, utilisation du premier champ: ${dateSelector}`)
-        }
+        // Si nous avons un sélecteur, essayer de sélectionner la commission
+        if (committeeSelector) {
+          console.log(`Tentative de sélection de la commission avec le sélecteur: ${committeeSelector}`)
 
-        // Si nous avons un sélecteur de date, essayer de définir la date
-        if (dateSelector) {
           // Vérifier si le sélecteur existe sur la page
           const selectorExists = await page.evaluate((selector) => {
             return !!document.querySelector(selector)
-          }, dateSelector)
+          }, committeeSelector)
 
           if (selectorExists) {
-            await page.evaluate(
-              (selector, date) => {
-                const element = document.querySelector(selector)
-                if (element) element.value = date
-              },
-              dateSelector,
-              startDate,
-            )
+            // Si c'est un select, utiliser la méthode select
+            if (committeeSelector.startsWith("select")) {
+              await page.select(committeeSelector, committeeValue).catch((e) => {
+                console.log(`Erreur lors de la sélection de la commission: ${e.message}`)
+              })
+            } else {
+              // Sinon, essayer de définir la valeur
+              await page.evaluate(
+                (selector, value) => {
+                  const element = document.querySelector(selector)
+                  if (element) element.value = value
+                },
+                committeeSelector,
+                committeeValue,
+              )
+            }
+
+            // Prendre une capture d'écran après la sélection de la commission
+            await page.screenshot({ path: "/tmp/after-alternative-committee-selection.png" })
           } else {
-            console.log(`Le sélecteur ${dateSelector} n'existe pas sur la page`)
-          }
-        } else {
-          console.log("Aucun champ de date trouvé")
-        }
-      }
-
-      // Rechercher le bouton de recherche
-      const searchButtonInfo = await page.evaluate(() => {
-        const buttons = Array.from(document.querySelectorAll("button, input[type='submit'], input[type='button']"))
-        return buttons
-          .filter((button) => {
-            const text = (button.innerText || button.value || "").toLowerCase()
-            return (
-              text.includes("search") ||
-              text.includes("recherche") ||
-              text.includes("find") ||
-              text.includes("submit") ||
-              text.includes("go")
-            )
-          })
-          .map((button) => {
-            return {
-              type: button.tagName.toLowerCase(),
-              id: button.id || "no-id",
-              name: button.name || "no-name",
-              value: button.value || "no-value",
-              text: button.innerText || button.value || "no-text",
-            }
-          })
-      })
-
-      console.log("Boutons de recherche trouvés:", JSON.stringify(searchButtonInfo, null, 2))
-
-      // Si nous avons trouvé des boutons de recherche, cliquer sur le premier
-      if (searchButtonInfo.length > 0) {
-        const button = searchButtonInfo[0]
-        const buttonSelector =
-          button.id !== "no-id"
-            ? `#${button.id}`
-            : button.name !== "no-name"
-              ? `[name="${button.name}"]`
-              : `button:contains("${button.text}")`
-
-        console.log(`Clic sur le bouton de recherche: ${buttonSelector}`)
-
-        await Promise.all([
-          page.click(buttonSelector).catch((e) => {
-            console.log(`Erreur lors du clic sur le bouton: ${e.message}`)
-          }),
-          page.waitForNavigation({ waitUntil: "networkidle2", timeout: 30000 }).catch((e) => {
-            console.log(`Navigation non détectée après recherche: ${e.message}`)
-          }),
-        ])
-      } else {
-        console.log("Aucun bouton de recherche trouvé, tentative de soumettre le formulaire")
-
-        // Essayer de soumettre le premier formulaire
-        await page.evaluate(() => {
-          const form = document.querySelector("form")
-          if (form) form.submit()
-        })
-
-        await page.waitForNavigation({ waitUntil: "networkidle2", timeout: 30000 }).catch((e) => {
-          console.log(`Navigation non détectée après soumission du formulaire: ${e.message}`)
-        })
-      }
-
-      // Attendre un peu pour s'assurer que les résultats sont chargés
-      await delay(5000)
-
-      // Prendre une capture d'écran des résultats
-      await page.screenshot({ path: "/tmp/search-results.png" })
-      await capturePageHtml(page, "/tmp/search-results.html")
-
-      // Analyser la structure de la page pour trouver les tableaux
-      const tableInfo = await page.evaluate(() => {
-        const tables = Array.from(document.querySelectorAll("table"))
-        return tables.map((table, index) => {
-          // Récupérer les en-têtes du tableau
-          const headers = Array.from(table.querySelectorAll("th, thead td")).map((th) => th.innerText.trim())
-
-          // Récupérer le nombre de lignes
-          const rows = table.querySelectorAll("tbody tr, tr").length
-
-          return {
-            index,
-            id: table.id || "no-id",
-            className: table.className || "no-class",
-            headers,
-            rows,
-          }
-        })
-      })
-
-      console.log("Tableaux trouvés:", JSON.stringify(tableInfo, null, 2))
-
-      // Trouver le tableau qui contient les résultats
-      let resultTableIndex = -1
-      for (let i = 0; i < tableInfo.length; i++) {
-        const table = tableInfo[i]
-        // Vérifier si les en-têtes du tableau contiennent des mots-clés liés aux votes
-        const headers = table.headers.map((h) => h.toLowerCase())
-        if (
-          headers.some(
-            (h) =>
-              h.includes("ballot") ||
-              h.includes("vote") ||
-              h.includes("committee") ||
-              h.includes("ref") ||
-              h.includes("status") ||
-              h.includes("result"),
-          ) &&
-          table.rows > 1 // Le tableau doit avoir au moins une ligne de données
-        ) {
-          resultTableIndex = i
-          console.log(`Tableau de résultats trouvé à l'index ${i}`)
-          break
-        }
-      }
-
-      // Si aucun tableau spécifique n'a été trouvé, prendre le tableau le plus grand
-      if (resultTableIndex === -1 && tableInfo.length > 0) {
-        // Trouver le tableau avec le plus de lignes
-        let maxRows = 0
-        for (let i = 0; i < tableInfo.length; i++) {
-          if (tableInfo[i].rows > maxRows) {
-            maxRows = tableInfo[i].rows
-            resultTableIndex = i
+            console.log(`Le sélecteur ${committeeSelector} n'existe pas sur la page`)
           }
         }
-        console.log(
-          `Aucun tableau spécifique trouvé, utilisation du tableau avec le plus de lignes (${maxRows}) à l'index ${resultTableIndex}`,
-        )
-      }
 
-      // Extraire les résultats
-      console.log("Extraction des résultats...")
-      let votes = []
+        // Rechercher le champ de date
+        let dateSelector = null
+        if (startDate) {
+          console.log(`Recherche du champ de date pour: ${startDate}`)
 
-      if (resultTableIndex !== -1) {
-        // Extraire les données du tableau
-        votes = await page.evaluate((tableIndex) => {
-          const tables = document.querySelectorAll("table")
-          const table = tables[tableIndex]
-          const results = []
-
-          // Récupérer les en-têtes du tableau
-          const headers = Array.from(table.querySelectorAll("th, thead td")).map((th) =>
-            th.innerText.trim().toLowerCase(),
-          )
-
-          // Récupérer les lignes de données
-          const rows = table.querySelectorAll("tbody tr, tr:not(:first-child)")
-
-          rows.forEach((row, index) => {
-            const cells = row.querySelectorAll("td")
-            if (cells.length < 3) return // Ignorer les lignes avec trop peu de cellules
-
-            // Créer un objet pour stocker les données de la ligne
-            const rowData = {
-              id: `vote-${index + 1}`,
-            }
-
-            // Parcourir les cellules et les associer aux en-têtes
-            for (let i = 0; i < cells.length; i++) {
-              const cell = cells[i]
-              const header = i < headers.length ? headers[i] : `column${i}`
-
-              // Extraire le texte et les liens
-              const text = cell.innerText.trim()
-              const link = cell.querySelector("a")
-              const href = link ? link.href : null
-
-              // Déterminer le type de données en fonction de l'en-tête
-              if (header.includes("ref") || header.includes("reference") || header.includes("title")) {
-                rowData.ref = text
-                rowData.title = link ? link.title || text : text
-              } else if (header.includes("committee")) {
-                rowData.committee = text
-              } else if (header.includes("votes")) {
-                rowData.votes = text
-              } else if (header.includes("result")) {
-                rowData.result = text
-              } else if (header.includes("status")) {
-                rowData.status = text
-              } else if (header.includes("opening") || header.includes("start")) {
-                rowData.openingDate = text
-              } else if (header.includes("closing") || header.includes("end")) {
-                rowData.closingDate = text
-              } else if (header.includes("role")) {
-                rowData.role = text
-              } else if (header.includes("source") && header.includes("type")) {
-                rowData.sourceType = text
-              } else if (header.includes("source") && !header.includes("type")) {
-                rowData.source = text
-              } else if (i === 0) {
-                // Première colonne, probablement un identifiant ou une référence
-                rowData.ref = text
-              } else if (i === 1) {
-                // Deuxième colonne, probablement un titre ou une description
-                rowData.title = text
-              }
-
-              // Stocker l'URL pour les détails si disponible
-              if (href && !rowData.detailsUrl) {
-                rowData.detailsUrl = href
-              }
-            }
-
-            // S'assurer que toutes les propriétés requises sont présentes
-            if (!rowData.ref) rowData.ref = ""
-            if (!rowData.title) rowData.title = ""
-            if (!rowData.committee) rowData.committee = ""
-            if (!rowData.votes) rowData.votes = ""
-            if (!rowData.result) rowData.result = ""
-            if (!rowData.status) rowData.status = ""
-            if (!rowData.openingDate) rowData.openingDate = ""
-            if (!rowData.closingDate) rowData.closingDate = ""
-            if (!rowData.role) rowData.role = ""
-            if (!rowData.sourceType) rowData.sourceType = ""
-            if (!rowData.source) rowData.source = ""
-
-            results.push(rowData)
-          })
-
-          return results
-        }, resultTableIndex)
-
-        console.log(`${votes.length} votes extraits`)
-      } else {
-        console.log("Aucun tableau de résultats trouvé, tentative d'extraction alternative")
-
-        // Extraction alternative des données
-        votes = await page.evaluate(() => {
-          const results = []
-
-          // Rechercher des éléments qui pourraient contenir des informations sur les votes
-          const voteElements = document.querySelectorAll(
-            ".ballot, .vote, [id*='ballot'], [id*='vote'], [class*='ballot'], [class*='vote'], div.row, li.item",
-          )
-
-          voteElements.forEach((element, index) => {
-            // Extraire les informations disponibles
-            const rowData = {
-              id: `vote-${index + 1}`,
-              ref: "",
-              title: "",
-              committee: "",
-              votes: "",
-              result: "",
-              status: "",
-              openingDate: "",
-              closingDate: "",
-              role: "",
-              sourceType: "",
-              source: "",
-            }
-
-            // Extraire le texte de l'élément
-            const text = element.innerText
-
-            // Essayer d'extraire des informations à partir du texte
-            const lines = text.split("\n")
-            if (lines.length > 0) rowData.ref = lines[0].trim()
-            if (lines.length > 1) rowData.title = lines[1].trim()
-
-            // Rechercher des mots-clés dans le texte
-            if (text.includes("Committee:")) {
-              const match = text.match(/Committee:\s*([^\n]+)/)
-              if (match) rowData.committee = match[1].trim()
-            }
-
-            if (text.includes("Status:")) {
-              const match = text.match(/Status:\s*([^\n]+)/)
-              if (match) rowData.status = match[1].trim()
-            }
-
-            if (text.includes("Result:")) {
-              const match = text.match(/Result:\s*([^\n]+)/)
-              if (match) rowData.result = match[1].trim()
-            }
-
-            if (text.includes("Opening:") || text.includes("Start:")) {
-              const match = text.match(/(Opening|Start):\s*([^\n]+)/)
-              if (match) rowData.openingDate = match[2].trim()
-            }
-
-            if (text.includes("Closing:") || text.includes("End:")) {
-              const match = text.match(/(Closing|End):\s*([^\n]+)/)
-              if (match) rowData.closingDate = match[2].trim()
-            }
-
-            // Extraire les liens
-            const links = element.querySelectorAll("a")
-            links.forEach((link) => {
-              const linkText = link.innerText.trim()
-              const href = link.href
-
-              // Si le lien contient du texte qui ressemble à une référence, l'utiliser comme référence
-              if (linkText.match(/[A-Z]+\/[0-9]+/) || linkText.includes("ISO") || linkText.includes("EN")) {
-                rowData.ref = linkText
-                rowData.detailsUrl = href
-              }
-            })
-
-            results.push(rowData)
-          })
-
-          return results
-        })
-
-        console.log(`${votes.length} votes extraits par méthode alternative`)
-      }
-
-      // Extraire les détails des votes si demandé
-      if (extractDetails && votes.length > 0) {
-        console.log("Extraction des détails des votes...")
-
-        for (let i = 0; i < votes.length; i++) {
-          const vote = votes[i]
-
-          // Vérifier si le vote a des détails à extraire et une URL de détails
-          if (vote.votes && vote.votes.includes("vote") && vote.detailsUrl) {
-            console.log(`Extraction des détails pour le vote ${i + 1}/${votes.length}: ${vote.ref}`)
-
-            // Naviguer vers la page de détails
-            await page.goto(vote.detailsUrl, { waitUntil: "networkidle2", timeout: 30000 }).catch(async (error) => {
-              console.error(`Erreur lors de la navigation vers les détails du vote ${vote.ref}:`, error)
-              // Continuer avec le vote suivant
-              return
-            })
-
-            // Attendre que la page de détails soit chargée
-            await delay(3000)
-
-            // Prendre une capture d'écran de la page de détails
-            await page.screenshot({ path: `/tmp/vote-details-${i}.png` })
-            await capturePageHtml(page, `/tmp/vote-details-${i}.html`)
-
-            // Analyser la structure de la page pour trouver les tableaux
-            const detailsTableInfo = await page.evaluate(() => {
-              const tables = Array.from(document.querySelectorAll("table"))
-              return tables.map((table, index) => {
-                // Récupérer les en-têtes du tableau
-                const headers = Array.from(table.querySelectorAll("th, thead td")).map((th) => th.innerText.trim())
-
-                // Récupérer le nombre de lignes
-                const rows = table.querySelectorAll("tbody tr, tr").length
-
+          // Rechercher des champs de date
+          const dateFields = await page.evaluate(() => {
+            const inputs = Array.from(document.querySelectorAll("input"))
+            return inputs
+              .filter((input) => {
+                return (
+                  input.type === "date" ||
+                  input.name.toLowerCase().includes("date") ||
+                  input.id.toLowerCase().includes("date") ||
+                  input.placeholder?.toLowerCase().includes("date")
+                )
+              })
+              .map((input) => {
                 return {
-                  index,
-                  id: table.id || "no-id",
-                  className: table.className || "no-class",
-                  headers,
-                  rows,
+                  type: input.type,
+                  id: input.id || "no-id",
+                  name: input.name || "no-name",
+                  placeholder: input.placeholder || "no-placeholder",
                 }
               })
+          })
+
+          console.log("Champs de date trouvés:", JSON.stringify(dateFields, null, 2))
+
+          // Rechercher un champ de date qui pourrait correspondre à la date de début
+          for (const field of dateFields) {
+            if (
+              field.name.toLowerCase().includes("begin") ||
+              field.id.toLowerCase().includes("begin") ||
+              field.name.toLowerCase().includes("start") ||
+              field.id.toLowerCase().includes("start")
+            ) {
+              dateSelector = field.name ? `input[name="${field.name}"]` : `input#${field.id}`
+              console.log(`Champ de date de début trouvé: ${dateSelector}`)
+              break
+            }
+          }
+
+          // Si aucun champ spécifique n'a été trouvé, prendre le premier champ de date
+          if (!dateSelector && dateFields.length > 0) {
+            const firstField = dateFields[0]
+            dateSelector = firstField.name ? `input[name="${firstField.name}"]` : `input#${firstField.id}`
+            console.log(`Aucun champ de date spécifique trouvé, utilisation du premier champ: ${dateSelector}`)
+          }
+
+          // Si nous avons un sélecteur de date, essayer de définir la date
+          if (dateSelector) {
+            // Vérifier si le sélecteur existe sur la page
+            const selectorExists = await page.evaluate((selector) => {
+              return !!document.querySelector(selector)
+            }, dateSelector)
+
+            if (selectorExists) {
+              await page.evaluate(
+                (selector, date) => {
+                  const element = document.querySelector(selector)
+                  if (element) element.value = date
+                },
+                dateSelector,
+                startDate,
+              )
+
+              // Prendre une capture d'écran après la définition de la date
+              await page.screenshot({ path: "/tmp/after-alternative-date-setting.png" })
+            } else {
+              console.log(`Le sélecteur ${dateSelector} n'existe pas sur la page`)
+            }
+          } else {
+            console.log("Aucun champ de date trouvé")
+          }
+        }
+
+        // Rechercher le bouton de recherche
+        const searchButtonInfo = await page.evaluate(() => {
+          const buttons = Array.from(document.querySelectorAll("button, input[type='submit'], input[type='button']"))
+          return buttons
+            .filter((button) => {
+              const text = (button.innerText || button.value || "").toLowerCase()
+              return (
+                text.includes("search") ||
+                text.includes("recherche") ||
+                text.includes("find") ||
+                text.includes("submit") ||
+                text.includes("go")
+              )
+            })
+            .map((button) => {
+              return {
+                type: button.tagName.toLowerCase(),
+                id: button.id || "no-id",
+                name: button.name || "no-name",
+                value: button.value || "no-value",
+                text: button.innerText || button.value || "no-text",
+              }
+            })
+        })
+
+        console.log("Boutons de recherche trouvés:", JSON.stringify(searchButtonInfo, null, 2))
+
+        // Si nous avons trouvé des boutons de recherche, cliquer sur le premier
+        if (searchButtonInfo.length > 0) {
+          const button = searchButtonInfo[0]
+          const buttonSelector =
+            button.id !== "no-id"
+              ? `#${button.id}`
+              : button.name !== "no-name"
+                ? `[name="${button.name}"]`
+                : `button:contains("${button.text}")`
+
+          console.log(`Clic sur le bouton de recherche: ${buttonSelector}`)
+
+          try {
+            await Promise.all([
+              page.click(buttonSelector).catch((e) => {
+                console.log(`Erreur lors du clic sur le bouton: ${e.message}`)
+              }),
+              waitForNavigationSafely(page, { timeout: 30000 }),
+            ])
+
+            // Attendre un peu pour s'assurer que les résultats sont chargés
+            await delay(10000)
+          } catch (error) {
+            console.error("Erreur lors du clic sur le bouton de recherche:", error)
+          }
+        } else {
+          console.log("Aucun bouton de recherche trouvé, tentative de soumettre le formulaire")
+
+          // Essayer de soumettre le premier formulaire
+          try {
+            await page.evaluate(() => {
+              const form = document.querySelector("form")
+              if (form) form.submit()
             })
 
-            console.log(`Tableaux trouvés sur la page de détails:`, JSON.stringify(detailsTableInfo, null, 2))
+            await waitForNavigationSafely(page, { timeout: 30000 })
+            await delay(10000)
+          } catch (error) {
+            console.error("Erreur lors de la soumission du formulaire:", error)
+          }
+        }
 
-            // Trouver le tableau qui contient les détails des votes
-            let detailsTableIndex = -1
-            for (let j = 0; j < detailsTableInfo.length; j++) {
-              const table = detailsTableInfo[j]
-              // Vérifier si les en-têtes du tableau contiennent des mots-clés liés aux détails des votes
-              const headers = table.headers.map((h) => h.toLowerCase())
+        // Prendre une capture d'écran des résultats
+        await page.screenshot({ path: "/tmp/alternative-search-results.png" })
+
+        try {
+          await capturePageHtml(page, "/tmp/alternative-search-results.html")
+        } catch (e) {
+          console.log(`Erreur lors de la capture du HTML des résultats alternatifs: ${e.message}`)
+        }
+
+        // Extraction alternative des données
+        console.log("Tentative d'extraction alternative des résultats")
+        const votes = await page
+          .evaluate(() => {
+            // Essayer de trouver un tableau qui pourrait contenir les résultats
+            const tables = Array.from(document.querySelectorAll("table"))
+            let resultsTable = null
+
+            // Chercher le tableau qui contient les résultats
+            for (const table of tables) {
+              const headers = Array.from(table.querySelectorAll("th")).map((th) => th.innerText.trim().toLowerCase())
               if (
                 headers.some(
-                  (h) => h.includes("participant") || h.includes("vote") || h.includes("cast") || h.includes("date"),
-                ) &&
-                table.rows > 1 // Le tableau doit avoir au moins une ligne de données
+                  (h) =>
+                    h.includes("ballot") ||
+                    h.includes("vote") ||
+                    h.includes("committee") ||
+                    h.includes("ref") ||
+                    h.includes("status") ||
+                    h.includes("result"),
+                )
               ) {
-                detailsTableIndex = j
-                console.log(`Tableau de détails trouvé à l'index ${j}`)
+                resultsTable = table
                 break
               }
             }
 
             // Si aucun tableau spécifique n'a été trouvé, prendre le tableau le plus grand
-            if (detailsTableIndex === -1 && detailsTableInfo.length > 0) {
-              // Trouver le tableau avec le plus de lignes
+            if (!resultsTable && tables.length > 0) {
               let maxRows = 0
-              for (let j = 0; j < detailsTableInfo.length; j++) {
-                if (detailsTableInfo[j].rows > maxRows) {
-                  maxRows = detailsTableInfo[j].rows
-                  detailsTableIndex = j
+              for (const table of tables) {
+                const rows = table.querySelectorAll("tr").length
+                if (rows > maxRows) {
+                  maxRows = rows
+                  resultsTable = table
                 }
               }
-              console.log(
-                `Aucun tableau de détails spécifique trouvé, utilisation du tableau avec le plus de lignes (${maxRows}) à l'index ${detailsTableIndex}`,
-              )
             }
 
-            if (detailsTableIndex !== -1) {
-              // Extraire les détails du tableau
-              vote.voteDetails = await page.evaluate((tableIndex) => {
-                const tables = document.querySelectorAll("table")
-                const table = tables[tableIndex]
-                const details = []
+            if (!resultsTable) return []
 
-                // Récupérer les en-têtes du tableau
-                const headers = Array.from(table.querySelectorAll("th, thead td")).map((th) =>
-                  th.innerText.trim().toLowerCase(),
-                )
+            // Récupérer les en-têtes
+            const headers = Array.from(resultsTable.querySelectorAll("th")).map((th) =>
+              th.innerText.trim().toLowerCase(),
+            )
 
-                // Récupérer les lignes de données
-                const rows = table.querySelectorAll("tbody tr, tr:not(:first-child)")
+            // Récupérer les lignes de données
+            const rows = Array.from(resultsTable.querySelectorAll("tbody tr, tr:not(:first-child)"))
 
-                rows.forEach((row) => {
-                  const cells = row.querySelectorAll("td")
-                  if (cells.length < 3) return // Ignorer les lignes avec trop peu de cellules
+            // Extraire les données de chaque ligne
+            return rows
+              .map((row, index) => {
+                const cells = Array.from(row.querySelectorAll("td"))
+                if (cells.length < 3) return null // Ignorer les lignes avec trop peu de cellules
 
-                  // Créer un objet pour stocker les données de la ligne
-                  const rowData = {}
+                // Créer un objet pour stocker les données
+                const rowData = {
+                  id: `vote-${index + 1}`,
+                  ref: "",
+                  title: "",
+                  committee: "",
+                  votes: "",
+                  result: "",
+                  status: "",
+                  openingDate: "",
+                  closingDate: "",
+                  role: "",
+                  sourceType: "",
+                  source: "",
+                }
 
-                  // Parcourir les cellules et les associer aux en-têtes
-                  for (let i = 0; i < cells.length; i++) {
-                    const cell = cells[i]
-                    const header = i < headers.length ? headers[i] : `column${i}`
-                    const text = cell.innerText.trim()
+                // Associer les cellules aux en-têtes
+                cells.forEach((cell, i) => {
+                  const header = headers[i] || `column${i}`
+                  const text = cell.innerText.trim()
+                  const link = cell.querySelector("a")
+                  const href = link ? link.href : null
 
-                    // Déterminer le type de données en fonction de l'en-tête
-                    if (header.includes("participant") || header.includes("country")) {
-                      rowData.participant = text
-                    } else if (header.includes("vote")) {
-                      rowData.vote = text
-                    } else if (header.includes("cast") || header.includes("by") || header.includes("user")) {
-                      rowData.castBy = text
-                    } else if (header.includes("date")) {
-                      rowData.date = text
-                    } else if (i === 0) {
-                      // Première colonne, probablement le participant
-                      rowData.participant = text
-                    } else if (i === 1) {
-                      // Deuxième colonne, probablement le vote
-                      rowData.vote = text
-                    } else if (i === 2) {
-                      // Troisième colonne, probablement qui a voté
-                      rowData.castBy = text
-                    } else if (i === 3) {
-                      // Quatrième colonne, probablement la date
-                      rowData.date = text
-                    }
+                  // Déterminer le type de données
+                  if (header.includes("ref") || header.includes("reference")) {
+                    rowData.ref = text
+                    rowData.title = link ? link.title || text : text
+                    if (href) rowData.detailsUrl = href
+                  } else if (header.includes("committee")) {
+                    rowData.committee = text
+                  } else if (header.includes("vote")) {
+                    rowData.votes = text
+                  } else if (header.includes("result")) {
+                    rowData.result = text
+                  } else if (header.includes("status")) {
+                    rowData.status = text
+                  } else if (header.includes("opening")) {
+                    rowData.openingDate = text
+                  } else if (header.includes("closing")) {
+                    rowData.closingDate = text
+                  } else if (header.includes("role")) {
+                    rowData.role = text
+                  } else if (header.includes("source") && header.includes("type")) {
+                    rowData.sourceType = text
+                  } else if (header.includes("source") && !header.includes("type")) {
+                    rowData.source = text
+                  } else if (i === 0) {
+                    // Première colonne, probablement un identifiant ou une référence
+                    rowData.ref = text
+                  } else if (i === 1) {
+                    // Deuxième colonne, probablement un titre ou une description
+                    rowData.title = text
                   }
 
-                  // S'assurer que toutes les propriétés requises sont présentes
-                  if (!rowData.participant) rowData.participant = ""
-                  if (!rowData.vote) rowData.vote = ""
-                  if (!rowData.castBy) rowData.castBy = ""
-                  if (!rowData.date) rowData.date = ""
-
-                  details.push(rowData)
+                  // Stocker l'URL pour les détails si disponible
+                  if (href && !rowData.detailsUrl) {
+                    rowData.detailsUrl = href
+                  }
                 })
 
-                return details
-              }, detailsTableIndex)
-
-              console.log(`${vote.voteDetails.length} détails extraits pour le vote ${vote.ref}`)
-            } else {
-              console.log(`Aucun tableau de détails trouvé pour le vote ${vote.ref}`)
-              vote.voteDetails = []
-            }
-
-            // Revenir à la page des résultats
-            await page
-              .goto(
-                "https://isolutions.iso.org/ballots/part/viewMyBallots.do?method=doSearch&org.apache.struts.taglib.html.CANCEL=true&startIndex=0",
-                {
-                  waitUntil: "networkidle2",
-                  timeout: 30000,
-                },
-              )
-              .catch(async (error) => {
-                console.error(`Erreur lors du retour à la page des résultats après le vote ${vote.ref}:`, error)
+                return rowData
               })
+              .filter(Boolean) // Filtrer les lignes nulles
+          })
+          .catch((e) => {
+            console.log(`Erreur lors de l'extraction alternative des résultats: ${e.message}`)
+            return []
+          })
 
-            // Attendre un peu pour s'assurer que la page est chargée
-            await delay(3000)
-          } else {
-            vote.voteDetails = []
-          }
-        }
+        console.log(`${votes.length} votes extraits par méthode alternative`)
+
+        // Fermer le navigateur
+        await browser.close()
+        browser = null
+
+        // Retourner les résultats
+        return res.json({
+          votes,
+          debug: {
+            receivedCommissionId: commissionId,
+            extractedCommissionCode: commissionCode,
+            username: username,
+            startDate: startDate,
+            numVotesGenerated: votes.length,
+            alternativeMethod: true,
+          },
+        })
       }
-
-      // Fermer le navigateur
-      await browser.close()
-      browser = null
-
-      // Retourner les résultats
-      return res.json({
-        votes,
-        debug: {
-          receivedCommissionId: commissionId,
-          extractedCommissionCode: commissionCode,
-          username: username,
-          startDate: startDate,
-          numVotesGenerated: votes.length,
-        },
-      })
     } catch (error) {
       console.error("Erreur lors de l'extraction:", error)
 
