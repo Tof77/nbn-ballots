@@ -29,7 +29,7 @@ interface Vote {
   voteDetails?: VoteDetail[] // Propriété optionnelle pour les détails des votes
 }
 
-// Fonction pour déchiffrer les données simulées (déplacée en dehors du bloc)
+// Fonction pour déchiffrer les données simulées
 function simulateDecryption(encryptedData: string): string {
   try {
     // Décodage base64 et vérification du préfixe "demo:"
@@ -44,7 +44,7 @@ function simulateDecryption(encryptedData: string): string {
   }
 }
 
-// Fonction pour extraire le code de commission (déplacée en dehors du bloc)
+// Fonction pour extraire le code de commission
 function extractCommissionCode(commissionId: string): string {
   // Rechercher un pattern comme E088/089, E123, etc.
   if (commissionId.includes("Buildwise/E")) {
@@ -56,19 +56,14 @@ function extractCommissionCode(commissionId: string): string {
   return "Unknown"
 }
 
-// Assurez-vous que le fichier est correctement nommé et placé dans le bon répertoire
-// Le nom du fichier doit être exactement "route.ts" (pas "route.vercel.ts" ou autre)
-// Le chemin complet doit être "app/api/extract-votes/route.ts"
-
-// Vérifiez que l'export de la fonction POST est correctement défini
 export async function POST(req: NextRequest) {
   try {
     // Récupérer et journaliser les données brutes
     const requestText = await req.text()
-    console.log("API - Données brutes reçues:", requestText)
+    console.log("API - Données brutes reçues (longueur):", requestText.length)
 
     // Parser les données JSON
-    let requestData
+    let requestData: any
     try {
       requestData = JSON.parse(requestText)
     } catch (error) {
@@ -79,7 +74,7 @@ export async function POST(req: NextRequest) {
           details: "Les données reçues ne sont pas un JSON valide",
           receivedData: requestText.substring(0, 100) + "...", // Afficher les 100 premiers caractères
         },
-        { status: 400 },
+        { status: 400 }
       )
     }
 
@@ -97,27 +92,52 @@ export async function POST(req: NextRequest) {
 
     // URL de votre API Render
     const renderApiUrl = process.env.RENDER_API_URL
-    if (renderApiUrl) {
+    console.log("API - RENDER_API_URL:", renderApiUrl)
+    
+    // Vérifier si l'API Render est configurée
+    if (!renderApiUrl) {
+      console.log("API - RENDER_API_URL non définie, utilisation des données simulées")
+      // Continuer avec le mode de secours
+    } else {
       try {
-        console.log("API - Redirection vers l'API Render:", renderApiUrl)
+        console.log("API - Tentative d'appel à l'API Render:", `${renderApiUrl}/api/extract-votes`)
+        
+        // Tester d'abord si l'API Render est accessible
+        try {
+          const pingResponse = await fetch(renderApiUrl, { 
+            method: "GET",
+            headers: { "Accept": "application/json" },
+            // Ajouter un timeout pour éviter d'attendre trop longtemps
+            signal: AbortSignal.timeout(5000) 
+          })
+          console.log("API - Ping Render status:", pingResponse.status)
+          
+          if (!pingResponse.ok) {
+            console.log("API - L'API Render n'est pas accessible, utilisation des données simulées")
+            throw new Error("L'API Render n'est pas accessible")
+          }
+        } catch (pingError) {
+          console.error("API - Erreur lors du ping de l'API Render:", pingError)
+          throw new Error("Erreur lors du ping de l'API Render")
+        }
 
-        // Appeler l'API Render
+        // Appeler l'API Render avec un timeout plus long pour l'opération principale
         const response = await fetch(`${renderApiUrl}/api/extract-votes`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
           body: JSON.stringify(requestData),
+          signal: AbortSignal.timeout(30000) // 30 secondes de timeout
         })
+
+        console.log("API - Statut de la réponse Render:", response.status, response.statusText)
 
         // Récupérer la réponse
         const responseText = await response.text()
-        console.log(
-          `API - Réponse de l'API Render (statut: ${response.status}):`,
-          responseText.substring(0, 200) + "...",
-        )
+        console.log("API - Longueur de la réponse Render:", responseText.length)
 
-        let responseData
+        let responseData: any
         try {
           responseData = JSON.parse(responseText)
         } catch (error) {
@@ -128,7 +148,7 @@ export async function POST(req: NextRequest) {
               details: "La réponse de l'API externe n'est pas un JSON valide",
               receivedResponse: responseText.substring(0, 500) + "...", // Afficher les 500 premiers caractères
             },
-            { status: 502 },
+            { status: 502 }
           )
         }
 
@@ -138,8 +158,9 @@ export async function POST(req: NextRequest) {
             {
               error: "Erreur de l'API Render",
               details: responseData.error || `Statut HTTP: ${response.status}`,
+              renderApiUrl: renderApiUrl
             },
-            { status: 502 },
+            { status: 502 }
           )
         }
 
@@ -148,9 +169,8 @@ export async function POST(req: NextRequest) {
       } catch (error) {
         console.error("API - Erreur lors de l'appel à l'API Render:", error)
         console.log("API - Utilisation des données simulées en fallback")
+        // Continuer avec le mode de secours
       }
-    } else {
-      console.log("API - RENDER_API_URL non définie, utilisation des données simulées")
     }
 
     // Si l'API Render n'est pas disponible ou si une erreur s'est produite, utiliser les données simulées
@@ -164,7 +184,7 @@ export async function POST(req: NextRequest) {
           error: "Identifiants chiffrés manquants",
           receivedData: sanitizedData,
         },
-        { status: 400 },
+        { status: 400 }
       )
     }
 
@@ -182,7 +202,7 @@ export async function POST(req: NextRequest) {
           error: "Échec du déchiffrement des identifiants",
           details: error instanceof Error ? error.message : String(error),
         },
-        { status: 400 },
+        { status: 400 }
       )
     }
 
@@ -449,18 +469,4 @@ export async function POST(req: NextRequest) {
         extractedCommissionCode: commissionCode,
         username: username,
         startDate: startDate,
-        numVotesGenerated: votes.length,
-        source: "fallback",
-      },
-    })
-  } catch (error) {
-    console.error("API - Erreur générale:", error)
-    return NextResponse.json(
-      {
-        error: "Erreur lors de l'extraction des votes",
-        details: error instanceof Error ? error.message : String(error),
-      },
-      { status: 500 },
-    )
-  }
-}
+        numVotesGenerated: vote
