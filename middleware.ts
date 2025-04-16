@@ -2,21 +2,18 @@ import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 
 export function middleware(request: NextRequest) {
-  // Désactivons temporairement la redirection pour déboguer
-  // Si la requête est pour l'API d'extraction des votes, nous la laissons passer directement
-
-  // Commentons cette partie pour le débogage
-  /*
+  // Si nous sommes en production (sur Vercel), utiliser l'implémentation Edge
+  // Sinon, utiliser l'implémentation Node.js pour le développement local
   if (request.nextUrl.pathname === "/api/extract-votes") {
-    // Rediriger vers la bonne implémentation en fonction de l'environnement
     if (process.env.VERCEL === "1") {
-      // Sur Vercel, utiliser l'implémentation Edge
+      console.log("Middleware: Redirection vers l'API Edge en production")
       const url = request.nextUrl.clone()
       url.pathname = "/api/extract-votes-edge"
       return NextResponse.rewrite(url)
+    } else {
+      console.log("Middleware: Utilisation de l'API Node.js en développement")
     }
   }
-  */
 
   return NextResponse.next()
 }
