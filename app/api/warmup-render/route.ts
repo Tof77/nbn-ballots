@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 
 // Cette route permet de "réchauffer" l'API Render avant de l'utiliser
 // Les plans gratuits de Render se mettent en veille après une période d'inactivité
+//commentaire pour forcer le push
 export async function GET() {
   const diagnostics: string[] = []
   const startTime = Date.now()
