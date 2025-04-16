@@ -69,6 +69,9 @@ export async function POST(req: NextRequest) {
     const renderApiUrl = process.env.RENDER_API_URL
     diagnostics.push(`RENDER_API_URL: ${renderApiUrl || "non définie"}`)
 
+    let isRenderApiAvailable = false
+    let renderApiError = null
+
     if (renderApiUrl) {
       try {
         diagnostics.push(`Tentative d'appel à l'API Render depuis l'API Edge: ${renderApiUrl}/api/extract-votes`)
@@ -78,55 +81,79 @@ export async function POST(req: NextRequest) {
           "Note: Si l'API ne répond pas, il est possible qu'une fenêtre de confirmation GDPR soit affichée sur le serveur Render.",
         )
 
-        // Appeler l'API Render
-        const response = await fetch(`${renderApiUrl}/api/extract-votes`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(requestData),
-        })
-
-        // Récupérer la réponse
-        const responseText = await response.text()
-
-        let responseData
+        // Vérifier d'abord si l'API Render est accessible
         try {
-          responseData = JSON.parse(responseText)
-        } catch (error) {
+          const pingResponse = await fetch(renderApiUrl, {
+            method: "GET",
+            headers: { Accept: "application/json" },
+            signal: AbortSignal.timeout(5000),
+          })
+
+          if (!pingResponse.ok) {
+            diagnostics.push(
+              `L'API Render a répondu avec un statut ${pingResponse.status}, utilisation du mode démonstration`,
+            )
+            throw new Error(`L'API Render a répondu avec un statut ${pingResponse.status}`)
+          }
+
+          isRenderApiAvailable = true
+          diagnostics.push("L'API Render est accessible")
+        } catch (pingError) {
+          renderApiError = pingError
           diagnostics.push(
-            `Erreur lors du parsing de la réponse JSON: ${error instanceof Error ? error.message : String(error)}`,
+            `Erreur lors du ping de l'API Render: ${pingError instanceof Error ? pingError.message : String(pingError)}`,
           )
-          return NextResponse.json(
-            {
-              error: "Format de réponse invalide",
-              details: "La réponse de l'API externe n'est pas un JSON valide",
-              receivedResponse: responseText.substring(0, 500) + "...", // Afficher les 500 premiers caractères
-              diagnostics,
+          diagnostics.push("Utilisation du mode démonstration")
+        }
+
+        // Si l'API Render est accessible, essayer d'appeler l'endpoint d'extraction
+        if (isRenderApiAvailable) {
+          // Appeler l'API Render
+          const response = await fetch(`${renderApiUrl}/api/extract-votes`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
             },
-            { status: 502 },
-          )
-        }
+            body: JSON.stringify(requestData),
+            signal: AbortSignal.timeout(30000), // 30 secondes de timeout
+          })
 
-        if (!response.ok) {
-          diagnostics.push(`Erreur de l'API Render: ${JSON.stringify(responseData, null, 2)}`)
-          return NextResponse.json(
-            {
-              error: "Erreur de l'API Render",
-              details: responseData.error || `Statut HTTP: ${response.status}`,
-              diagnostics,
-            },
-            { status: 502 },
-          )
-        }
+          // Récupérer la réponse
+          const responseText = await response.text()
 
-        // Ajouter les diagnostics à la réponse
-        if (!responseData.diagnostics) {
-          responseData.diagnostics = diagnostics
-        }
+          let responseData
+          try {
+            responseData = JSON.parse(responseText)
+          } catch (error) {
+            diagnostics.push(
+              `Erreur lors du parsing de la réponse JSON: ${error instanceof Error ? error.message : String(error)}`,
+            )
+            return NextResponse.json(
+              {
+                error: "Format de réponse invalide",
+                details: "La réponse de l'API externe n'est pas un JSON valide",
+                receivedResponse: responseText.substring(0, 500) + "...", // Afficher les 500 premiers caractères
+                diagnostics,
+              },
+              { status: 502 },
+            )
+          }
 
-        return NextResponse.json(responseData)
+          if (!response.ok) {
+            diagnostics.push(`Erreur de l'API Render: ${JSON.stringify(responseData, null, 2)}`)
+            renderApiError = new Error(responseData.error || `Statut HTTP: ${response.status}`)
+            diagnostics.push("Utilisation du mode démonstration suite à une erreur de l'API Render")
+          } else {
+            // Ajouter les diagnostics à la réponse
+            if (!responseData.diagnostics) {
+              responseData.diagnostics = diagnostics
+            }
+
+            return NextResponse.json(responseData)
+          }
+        }
       } catch (error) {
+        renderApiError = error
         diagnostics.push(
           `Erreur lors de l'appel à l'API Render: ${error instanceof Error ? error.message : String(error)}`,
         )
@@ -138,6 +165,14 @@ export async function POST(req: NextRequest) {
 
     // Si l'API Render n'est pas disponible ou si une erreur s'est produite, utiliser les données simulées
     const { commissionId, startDate, extractDetails = true, credentials } = requestData
+
+    // Ajouter un message de diagnostic sur l'erreur spécifique
+    if (renderApiError) {
+      diagnostics.push(
+        `Détection du mode de démonstration suite à l'erreur: ${renderApiError instanceof Error ? renderApiError.message : String(renderApiError)}`,
+      )
+      diagnostics.push("Activation du mode de démonstration avec données simulées")
+    }
 
     // Vérifier que les identifiants chiffrés sont fournis
     if (!credentials || !credentials.encryptedUsername || !credentials.encryptedPassword) {
@@ -172,6 +207,7 @@ export async function POST(req: NextRequest) {
     // Extraire le code de commission
     const commissionCode = extractCommissionCode(commissionId)
     diagnostics.push(`Code de commission extrait: ${commissionCode}`)
+    diagnostics.push(`MODE DÉMONSTRATION: Génération de données simulées pour la commission ${commissionCode}`)
 
     // Générer des données réalistes basées sur la capture d'écran fournie
     const votes: Vote[] = []
@@ -427,9 +463,11 @@ export async function POST(req: NextRequest) {
         startDate: startDate,
         numVotesGenerated: votes.length,
         source: "edge-fallback",
+        demoMode: true,
       },
       diagnostics,
       renderApiStatus: "unavailable",
+      renderApiMessage: "L'API Render n'est pas disponible. Utilisation du mode démonstration avec données simulées.",
     })
   } catch (error) {
     const totalDuration = Date.now() - startTime
