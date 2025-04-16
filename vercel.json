@@ -29,9 +29,5 @@
   ],
   "env": {
     "RENDER_API_URL": "https://nbn-ballots-api.onrender.com"
-  },
-  "includeFiles": [
-    "app/api/extract-votes-edge/**",
-    "app/api/test/**"
-  ]
+  }
 }
