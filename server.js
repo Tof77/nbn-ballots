@@ -48,6 +48,11 @@ async function capturePageHtml(page, path) {
   console.log(`HTML capturé et enregistré dans ${path}`)
 }
 
+// Fonction pour attendre un délai (compatible avec toutes les versions de Puppeteer)
+async function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 // Route principale pour l'extraction des votes
 app.post("/api/extract-votes", async (req, res) => {
   console.log("Requête d'extraction reçue")
@@ -124,7 +129,7 @@ app.post("/api/extract-votes", async (req, res) => {
       })
 
       // Attendre un peu pour s'assurer que la page est complètement chargée
-      await page.waitForTimeout(3000)
+      await delay(3000)
 
       // Prendre une capture d'écran pour le débogage
       await page.screenshot({ path: "/tmp/login-page-before.png" })
@@ -224,7 +229,7 @@ app.post("/api/extract-votes", async (req, res) => {
         ]).catch(async (error) => {
           console.error("Erreur lors de la navigation après connexion:", error)
           // Continuer quand même, car parfois la navigation ne se produit pas comme prévu
-          await page.waitForTimeout(5000)
+          await delay(5000)
         })
       }
 
@@ -256,7 +261,7 @@ app.post("/api/extract-votes", async (req, res) => {
       })
 
       // Attendre que la page soit chargée
-      await page.waitForTimeout(3000)
+      await delay(3000)
 
       // Capturer l'état de la page avant la sélection de la commission
       await page.screenshot({ path: "/tmp/before-committee-selection.png" })
@@ -308,7 +313,7 @@ app.post("/api/extract-votes", async (req, res) => {
       ]).catch(async (error) => {
         console.error("Erreur lors de la navigation après recherche:", error)
         // Continuer quand même, car parfois la navigation ne se produit pas comme prévu
-        await page.waitForTimeout(5000)
+        await delay(5000)
       })
 
       // Prendre une capture d'écran des résultats
@@ -382,7 +387,7 @@ app.post("/api/extract-votes", async (req, res) => {
               })
 
               // Attendre que la page de détails soit chargée
-              await page.waitForTimeout(2000)
+              await delay(2000)
 
               // Prendre une capture d'écran de la page de détails
               await page.screenshot({ path: `/tmp/vote-details-${i}.png` })
