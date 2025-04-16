@@ -1,8 +1,5 @@
 {
   "framework": "nextjs",
-  "buildCommand": "next build",
-  "devCommand": "next dev",
-  "installCommand": "yarn install",
   "regions": ["fra1"],
   "functions": {
     "app/api/extract-votes/route.ts": {
@@ -14,23 +11,6 @@
       "maxDuration": 60
     }
   },
-  "version": 2,
-  "builds": [
-    {
-      "src": "package.json",
-      "use": "@vercel/next"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "/api/$1"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/$1"
-    }
-  ],
   "env": {
     "RENDER_API_URL": "https://nbn-ballots-api.onrender.com"
   }
