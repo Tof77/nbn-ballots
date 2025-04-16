@@ -8,8 +8,29 @@
     "app/api/extract-votes/route.ts": {
       "memory": 1024,
       "maxDuration": 60
+    },
+    "app/api/extract-votes-edge/route.ts": {
+      "memory": 1024,
+      "maxDuration": 60
     }
   },
+  "version": 2,
+  "builds": [
+    {
+      "src": "package.json",
+      "use": "@vercel/next"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/$1"
+    }
+  ],
   "env": {
     "RENDER_API_URL": "https://nbn-ballots-api.onrender.com"
   }
