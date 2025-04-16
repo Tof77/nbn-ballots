@@ -5,7 +5,11 @@ const app = express()
 const port = process.env.PORT || 3000
 
 // Activer CORS pour permettre les requêtes depuis votre application Vercel
-app.use(cors())
+app.use(cors({
+  origin: '*', // Pour le développement, à restreindre en production
+  methods: ['GET', 'POST'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 app.use(express.json())
 
 // Route de test pour vérifier que l'API fonctionne
