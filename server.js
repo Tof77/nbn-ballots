@@ -5,11 +5,7 @@ const app = express()
 const port = process.env.PORT || 3000
 
 // Activer CORS pour permettre les requêtes depuis votre application Vercel
-app.use(cors({
-  origin: '*', // Pour le développement, à restreindre en production
-  methods: ['GET', 'POST'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+app.use(cors())
 app.use(express.json())
 
 // Route de test pour vérifier que l'API fonctionne
@@ -99,11 +95,13 @@ app.post("/api/extract-votes", async (req, res) => {
 
       // Se connecter
       console.log("Tentative de connexion...")
-      await page.type('input[name="username"]', username)
-      await page.type('input[name="password"]', password)
+      // Mise à jour des sélecteurs pour la page de connexion ISO
+      await page.type("#username", username)
+      await page.type("#password", password)
 
       // Cliquer sur le bouton de connexion et attendre la navigation
-      await Promise.all([page.click('button[type="submit"]'), page.waitForNavigation({ waitUntil: "networkidle2" })])
+      // Utiliser le sélecteur correct pour le bouton de connexion
+      await Promise.all([page.click("#kc-login"), page.waitForNavigation({ waitUntil: "networkidle2" })])
 
       // Prendre une capture d'écran après la connexion
       await page.screenshot({ path: "/tmp/after-login.png" })
