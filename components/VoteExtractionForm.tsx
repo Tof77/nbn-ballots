@@ -189,12 +189,17 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
       console.log("Réponse brute de l'API:", responseText)
       setDebugInfo((prev) => `${prev}\n\nRéponse brute de l'API: ${responseText}`)
 
+      // Remplacer la déclaration de json par celle-ci avec le typage approprié
       let json: {
-        votes?: any[];
-        debug?: any;
-        error?: string;
-        details?: string;
+        votes?: any[]
+        debug?: any
+        error?: string
+        details?: string
+        diagnostics?: string[]
+        renderApiStatus?: string
+        renderApiMessage?: string
       }
+
       try {
         json = JSON.parse(responseText)
         console.log("Réponse JSON parsée:", json)
@@ -319,6 +324,19 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
 
       {/* Afficher l'indicateur de statut de l'API Render */}
       {renderApiStatusIndicator()}
+
+      {renderApiStatus.status === "inactive" && (
+        <Alert className="mb-4 bg-yellow-50 border-yellow-200 text-yellow-800">
+          <AlertTitle className="flex items-center gap-2">
+            <WifiOffIcon className="h-4 w-4" />
+            Note importante concernant l'API Render
+          </AlertTitle>
+          <AlertDescription>
+            Si l'API Render ne répond pas, il est possible qu'une fenêtre de confirmation GDPR soit affichée sur le
+            serveur. Dans ce cas, un administrateur doit se connecter au serveur Render pour accepter les conditions.
+          </AlertDescription>
+        </Alert>
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 border border-gray-200 rounded-md bg-gray-50">
@@ -522,4 +540,3 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
     </Card>
   )
 }
-
