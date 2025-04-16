@@ -13,8 +13,26 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Loader2, ShieldIcon, BugIcon, WifiIcon, WifiOffIcon } from "lucide-react"
 import { encryptCredentials } from "@/utils/encryption"
 
+// Interface pour la réponse de l'API
+interface ApiResponse {
+  votes?: any[]
+  debug?: any
+  error?: string
+  details?: string
+  diagnostics?: string[]
+  renderApiStatus?: string
+  renderApiMessage?: string
+}
+
+// Interface pour le résultat du réchauffement de l'API
+interface WarmupResult {
+  success: boolean
+  status: string
+  message: string
+}
+
 // Ajouter une nouvelle fonction pour réchauffer l'API Render avant l'extraction
-async function warmupRenderApi(): Promise<{ success: boolean; status: string; message: string }> {
+async function warmupRenderApi(): Promise<WarmupResult> {
   try {
     console.log("Réchauffement de l'API Render...")
     const response = await fetch("/api/warmup-render")
@@ -189,16 +207,8 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
       console.log("Réponse brute de l'API:", responseText)
       setDebugInfo((prev) => `${prev}\n\nRéponse brute de l'API: ${responseText}`)
 
-      // Remplacer la déclaration de json par celle-ci avec le typage approprié
-      let json: {
-        votes?: any[]
-        debug?: any
-        error?: string
-        details?: string
-        diagnostics?: string[]
-        renderApiStatus?: string
-        renderApiMessage?: string
-      }
+      // Utiliser l'interface ApiResponse pour typer la réponse JSON
+      let json: ApiResponse
 
       try {
         json = JSON.parse(responseText)
