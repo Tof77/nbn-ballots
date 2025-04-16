@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Loader2, ShieldIcon, BugIcon, WifiIcon, WifiOffIcon } from "lucide-react"
+import { Loader2, ShieldIcon, BugIcon, WifiIcon, WifiOffIcon, ClockIcon } from "lucide-react"
 import { encryptCredentials } from "@/utils/encryption"
 
 // Interface pour la réponse de l'API
@@ -28,6 +28,7 @@ interface ApiResponse {
 interface WarmupResult {
   success: boolean
   status: string
+  statusMessage?: string
   message: string
 }
 
@@ -35,12 +36,59 @@ interface WarmupResult {
 async function warmupRenderApi(): Promise<WarmupResult> {
   try {
     console.log("Réchauffement de l'API Render...")
-    const response = await fetch("/api/warmup-render")
-    const data = await response.json()
+    const response = await fetch("/api/warmup-render", {
+      // Ajouter un cache-buster pour éviter les réponses en cache
+      headers: {
+        "Cache-Control": "no-cache",
+        Pragma: "no-cache",
+      },
+      // Ajouter un timestamp pour éviter le cache
+      cache: "no-store",
+    })
+
+    // Lire le texte de la réponse
+    let responseText = ""
+    try {
+      responseText = await response.text()
+    } catch (textError) {
+      console.error("Erreur lors de la lecture de la réponse:", textError)
+      return {
+        success: false,
+        status: "error",
+        message: `Erreur lors de la lecture de la réponse: ${textError instanceof Error ? textError.message : String(textError)}`,
+      }
+    }
+
+    // Essayer de parser le JSON
+    let data
+    try {
+      data = JSON.parse(responseText)
+    } catch (jsonError) {
+      console.error("Erreur lors du parsing de la réponse JSON:", jsonError)
+      console.log("Réponse brute:", responseText.substring(0, 200))
+      return {
+        success: false,
+        status: "error",
+        message: `La réponse n'est pas un JSON valide: ${jsonError instanceof Error ? jsonError.message : String(jsonError)}`,
+      }
+    }
+
     console.log("Résultat du réchauffement:", data)
+
+    // Si l'API est en cours de démarrage, considérer comme un succès partiel
+    if (data.statusMessage === "starting") {
+      return {
+        success: false,
+        status: "starting",
+        statusMessage: "starting",
+        message: data.message || "L'API Render est en cours de démarrage, veuillez réessayer dans 30-60 secondes",
+      }
+    }
+
     return {
       success: data.success === true,
       status: data.statusMessage || (data.success ? "active" : "inactive"),
+      statusMessage: data.statusMessage,
       message: data.message || "Statut de l'API inconnu",
     }
   } catch (error) {
@@ -54,7 +102,7 @@ async function warmupRenderApi(): Promise<WarmupResult> {
 }
 
 interface VoteExtractionFormProps {
-  onResultsReceived: (results: any[]) => void
+  onResultsReceived: (results: any[], isDemoMode?: boolean) => void
 }
 
 export default function VoteExtractionForm({ onResultsReceived }: VoteExtractionFormProps) {
@@ -69,7 +117,7 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
   const [debugInfo, setDebugInfo] = useState<string | null>(null)
   const [showDebug, setShowDebug] = useState(false)
   const [renderApiStatus, setRenderApiStatus] = useState<{
-    status: "unknown" | "active" | "inactive" | "error"
+    status: "unknown" | "active" | "inactive" | "error" | "starting"
     message: string
     lastChecked: Date | null
   }>({
@@ -78,6 +126,7 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
     lastChecked: null,
   })
   const [isWarmingUp, setIsWarmingUp] = useState(false)
+  const [demoMode, setDemoMode] = useState(false)
 
   // Vérifier que la clé publique est disponible au chargement du composant
   useEffect(() => {
@@ -108,7 +157,13 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
     try {
       const result = await warmupRenderApi()
       setRenderApiStatus({
-        status: result.success ? "active" : result.status === "error" ? "error" : "inactive",
+        status: result.success
+          ? "active"
+          : result.statusMessage === "starting"
+            ? "starting"
+            : result.status === "error"
+              ? "error"
+              : "inactive",
         message: result.message,
         lastChecked: new Date(),
       })
@@ -128,13 +183,20 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
     setLoading(true)
     setError("")
     setDebugInfo(null)
+    setDemoMode(false)
 
     try {
       // Réchauffer l'API Render avant de l'utiliser
       setDebugInfo("Réchauffement de l'API Render...")
       const warmupResult = await warmupRenderApi()
       setRenderApiStatus({
-        status: warmupResult.success ? "active" : warmupResult.status === "error" ? "error" : "inactive",
+        status: warmupResult.success
+          ? "active"
+          : warmupResult.statusMessage === "starting"
+            ? "starting"
+            : warmupResult.status === "error"
+              ? "error"
+              : "inactive",
         message: warmupResult.message,
         lastChecked: new Date(),
       })
@@ -223,6 +285,12 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
             lastChecked: new Date(),
           })
         }
+
+        if (json.debug?.demoMode) {
+          setDemoMode(true)
+          console.log("Mode démonstration activé")
+          setDebugInfo((prev) => `${prev}\n\nMode démonstration activé - Utilisation de données simulées`)
+        }
       } catch (parseError) {
         console.error("Erreur lors du parsing de la réponse JSON:", parseError)
         setDebugInfo(
@@ -240,7 +308,9 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
       console.log("Réponse de l'API:", json)
       setDebugInfo((prev) => `${prev}\n\nRéponse de l'API: ${JSON.stringify(json, null, 2)}`)
 
-      onResultsReceived(json.votes || [])
+      // Dans le bloc try après avoir reçu la réponse
+      const isDemoMode = !!json.debug?.demoMode
+      onResultsReceived(json.votes || [], isDemoMode)
 
       // Effacer le mot de passe après utilisation pour plus de sécurité
       setPassword("")
@@ -259,6 +329,8 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
       switch (renderApiStatus.status) {
         case "active":
           return <WifiIcon className="h-4 w-4 text-green-500" />
+        case "starting":
+          return <ClockIcon className="h-4 w-4 text-blue-500" />
         case "inactive":
           return <WifiOffIcon className="h-4 w-4 text-orange-500" />
         case "error":
@@ -272,6 +344,8 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
       switch (renderApiStatus.status) {
         case "active":
           return "API Render active"
+        case "starting":
+          return "API Render en cours de démarrage"
         case "inactive":
           return "API Render inactive"
         case "error":
@@ -285,6 +359,8 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
       switch (renderApiStatus.status) {
         case "active":
           return "bg-green-50 border-green-200 text-green-700"
+        case "starting":
+          return "bg-blue-50 border-blue-200 text-blue-700"
         case "inactive":
           return "bg-orange-50 border-orange-200 text-orange-700"
         case "error":
@@ -334,6 +410,32 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
 
       {/* Afficher l'indicateur de statut de l'API Render */}
       {renderApiStatusIndicator()}
+
+      {renderApiStatus.status === "starting" && (
+        <Alert className="mb-4 bg-blue-50 border-blue-200 text-blue-800">
+          <AlertTitle className="flex items-center gap-2">
+            <ClockIcon className="h-4 w-4" />
+            API Render en cours de démarrage
+          </AlertTitle>
+          <AlertDescription>
+            L'API Render est en train de démarrer. Ce processus peut prendre 30 à 60 secondes. Veuillez patienter ou
+            réessayer dans quelques instants.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {demoMode && (
+        <Alert className="mb-4 bg-blue-50 border-blue-200 text-blue-800">
+          <AlertTitle className="flex items-center gap-2">
+            <BugIcon className="h-4 w-4" />
+            Mode Démonstration
+          </AlertTitle>
+          <AlertDescription>
+            L'application fonctionne actuellement en mode démonstration avec des données simulées. Les données affichées
+            ne proviennent pas d'isolutions.iso.org.
+          </AlertDescription>
+        </Alert>
+      )}
 
       {renderApiStatus.status === "inactive" && (
         <Alert className="mb-4 bg-yellow-50 border-yellow-200 text-yellow-800">
@@ -478,7 +580,13 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
               try {
                 const result = await warmupRenderApi()
                 setRenderApiStatus({
-                  status: result.success ? "active" : result.status === "error" ? "error" : "inactive",
+                  status: result.success
+                    ? "active"
+                    : result.statusMessage === "starting"
+                      ? "starting"
+                      : result.status === "error"
+                        ? "error"
+                        : "inactive",
                   message: result.message,
                   lastChecked: new Date(),
                 })
