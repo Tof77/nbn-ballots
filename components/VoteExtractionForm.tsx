@@ -142,7 +142,12 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
       console.log("Réponse brute de l'API:", responseText)
       setDebugInfo((prev) => `${prev}\n\nRéponse brute de l'API: ${responseText}`)
 
-      let json
+      let json: {
+        votes?: any[];
+        debug?: any;
+        error?: string;
+        details?: string;
+      }
       try {
         json = JSON.parse(responseText)
         console.log("Réponse JSON parsée:", json)
