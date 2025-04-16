@@ -1,5 +1,6 @@
 // app/api/index.ts
 // Ce fichier force l'inclusion de tous les endpoints API
+//Espérons que cela marche
 import './extract-votes/route'
 import './extract-votes-edge/route'
 import './test/route'
