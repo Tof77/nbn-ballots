@@ -46,6 +46,7 @@ async function capturePageHtml(page, path) {
   const fs = require("fs")
   fs.writeFileSync(path, html)
   console.log(`HTML capturé et enregistré dans ${path}`)
+  return html
 }
 
 // Fonction pour attendre un délai (compatible avec toutes les versions de Puppeteer)
@@ -128,14 +129,54 @@ app.post("/api/extract-votes", async (req, res) => {
         timeout: 30000,
       })
 
-      // Attendre un peu pour s'assurer que la page est complètement chargée
-      await delay(3000)
+      // Attendre un peu plus longtemps pour s'assurer que la page est complètement chargée
+      await delay(5000)
 
       // Prendre une capture d'écran pour le débogage
       await page.screenshot({ path: "/tmp/login-page-before.png" })
 
       // Capturer le HTML pour le débogage
-      await capturePageHtml(page, "/tmp/login-page-html.txt")
+      const htmlContent = await capturePageHtml(page, "/tmp/login-page-html.txt")
+      console.log("HTML capturé, longueur:", htmlContent.length)
+
+      // Analyser la structure de la page pour trouver les champs de connexion
+      const loginFormInfo = await page.evaluate(() => {
+        // Rechercher tous les formulaires sur la page
+        const forms = Array.from(document.querySelectorAll("form"))
+
+        // Rechercher tous les champs de saisie qui pourraient être des champs de nom d'utilisateur ou de mot de passe
+        const inputs = Array.from(document.querySelectorAll("input"))
+
+        // Rechercher les iframes qui pourraient contenir le formulaire de connexion
+        const iframes = Array.from(document.querySelectorAll("iframe"))
+
+        return {
+          forms: forms.map((form) => ({
+            id: form.id,
+            action: form.action,
+            method: form.method,
+            inputs: Array.from(form.querySelectorAll("input")).map((input) => ({
+              id: input.id,
+              name: input.name,
+              type: input.type,
+              placeholder: input.placeholder,
+            })),
+          })),
+          inputs: inputs.map((input) => ({
+            id: input.id,
+            name: input.name,
+            type: input.type,
+            placeholder: input.placeholder,
+          })),
+          iframes: iframes.map((iframe) => ({
+            id: iframe.id,
+            name: iframe.name,
+            src: iframe.src,
+          })),
+        }
+      })
+
+      console.log("Informations sur le formulaire de connexion:", JSON.stringify(loginFormInfo, null, 2))
 
       // Se connecter
       console.log("Tentative de connexion...")
@@ -151,33 +192,169 @@ app.post("/api/extract-votes", async (req, res) => {
         // Attendre que l'iframe soit chargé
         await page.waitForSelector("iframe", { timeout: 10000 })
 
-        // Obtenir le premier iframe
-        const frameHandle = await page.$("iframe")
-        const frame = await frameHandle.contentFrame()
+        // Obtenir tous les iframes
+        const frames = await page.frames()
+        console.log(`Nombre d'iframes trouvés: ${frames.length}`)
 
-        // Attendre que les champs de connexion soient disponibles dans l'iframe
-        await frame.waitForSelector("#username", { timeout: 10000 })
-        await frame.waitForSelector("#password", { timeout: 10000 })
+        // Parcourir tous les iframes pour trouver celui qui contient le formulaire de connexion
+        let loginFrame = null
+        for (const frame of frames) {
+          const url = frame.url()
+          console.log(`Vérification de l'iframe: ${url}`)
+
+          // Prendre une capture d'écran de l'iframe si possible
+          try {
+            const frameElement = await page.$(`:has(> iframe[src="${url}"])`)
+            if (frameElement) {
+              await frameElement.screenshot({ path: `/tmp/iframe-${frames.indexOf(frame)}.png` })
+            }
+          } catch (e) {
+            console.log(`Impossible de capturer l'iframe: ${e.message}`)
+          }
+
+          // Vérifier si l'iframe contient un champ de nom d'utilisateur
+          const hasUsernameField = await frame.evaluate(() => {
+            return !!(
+              document.querySelector("#username") ||
+              document.querySelector('input[name="username"]') ||
+              document.querySelector('input[type="text"]') ||
+              document.querySelector('input[placeholder*="user"]') ||
+              document.querySelector('input[placeholder*="User"]')
+            )
+          })
+
+          if (hasUsernameField) {
+            console.log(`Iframe de connexion trouvé: ${url}`)
+            loginFrame = frame
+            break
+          }
+        }
+
+        if (!loginFrame) {
+          console.error("Aucun iframe contenant un formulaire de connexion n'a été trouvé")
+          await page.screenshot({ path: "/tmp/no-login-iframe-found.png" })
+          throw new Error("Aucun iframe contenant un formulaire de connexion n'a été trouvé")
+        }
+
+        // Analyser la structure du formulaire dans l'iframe
+        const iframeFormInfo = await loginFrame.evaluate(() => {
+          const inputs = Array.from(document.querySelectorAll("input"))
+          return {
+            inputs: inputs.map((input) => ({
+              id: input.id,
+              name: input.name,
+              type: input.type,
+              placeholder: input.placeholder,
+            })),
+          }
+        })
+
+        console.log("Champs de saisie dans l'iframe:", JSON.stringify(iframeFormInfo, null, 2))
+
+        // Trouver les sélecteurs appropriés dans l'iframe
+        const usernameSelector = await loginFrame.evaluate(() => {
+          const selectors = ["#username", 'input[name="username"]', 'input[type="text"]', 'input[id="username"]']
+          for (const selector of selectors) {
+            if (document.querySelector(selector)) return selector
+          }
+          return null
+        })
+
+        const passwordSelector = await loginFrame.evaluate(() => {
+          const selectors = ["#password", 'input[name="password"]', 'input[type="password"]', 'input[id="password"]']
+          for (const selector of selectors) {
+            if (document.querySelector(selector)) return selector
+          }
+          return null
+        })
+
+        const loginButtonSelector = await loginFrame.evaluate(() => {
+          const selectors = ["#kc-login", 'input[type="submit"]', 'button[type="submit"]', "button.submit"]
+          for (const selector of selectors) {
+            if (document.querySelector(selector)) return selector
+          }
+          return null
+        })
+
+        console.log(
+          `Sélecteurs trouvés dans l'iframe - Username: ${usernameSelector}, Password: ${passwordSelector}, Login: ${loginButtonSelector}`,
+        )
+
+        if (!usernameSelector || !passwordSelector || !loginButtonSelector) {
+          console.error("Impossible de trouver tous les sélecteurs nécessaires dans l'iframe")
+          await page.screenshot({ path: "/tmp/iframe-selectors-not-found.png" })
+          throw new Error("Impossible de trouver tous les sélecteurs nécessaires dans l'iframe")
+        }
 
         // Remplir les champs de connexion dans l'iframe
-        await frame.type("#username", username)
-        await frame.type("#password", password)
+        await loginFrame.type(usernameSelector, username)
+        await loginFrame.type(passwordSelector, password)
 
         // Cliquer sur le bouton de connexion dans l'iframe
         await Promise.all([
-          frame.click("#kc-login"),
-          page.waitForNavigation({ waitUntil: "networkidle2", timeout: 30000 }),
+          loginFrame.click(loginButtonSelector),
+          page.waitForNavigation({ waitUntil: "networkidle2", timeout: 30000 }).catch((e) => {
+            console.log("Navigation non détectée après la connexion:", e.message)
+          }),
         ])
       } else {
         // Essayer différentes combinaisons de sélecteurs pour les champs de connexion
-        const usernameSelectors = ["#username", 'input[name="username"]', 'input[type="text"]', 'input[id="username"]']
+        const usernameSelectors = [
+          "#username",
+          'input[name="username"]',
+          'input[type="text"]',
+          'input[id="username"]',
+          'input[placeholder*="user"]',
+          'input[placeholder*="User"]',
+        ]
+
         const passwordSelectors = [
           "#password",
           'input[name="password"]',
           'input[type="password"]',
           'input[id="password"]',
+          'input[placeholder*="pass"]',
+          'input[placeholder*="Pass"]',
         ]
-        const loginButtonSelectors = ["#kc-login", 'input[type="submit"]', 'button[type="submit"]', "button.submit"]
+
+        const loginButtonSelectors = [
+          "#kc-login",
+          'input[type="submit"]',
+          'button[type="submit"]',
+          "button.submit",
+          'button:contains("Sign In")',
+          'button:contains("Login")',
+          'button:contains("Log in")',
+        ]
+
+        // Attendre que la page soit complètement chargée
+        await delay(3000)
+
+        // Rechercher les éléments visibles sur la page
+        const visibleElements = await page.evaluate(() => {
+          return Array.from(document.querySelectorAll("*"))
+            .filter((el) => {
+              const style = window.getComputedStyle(el)
+              return (
+                style.display !== "none" &&
+                style.visibility !== "hidden" &&
+                style.opacity !== "0" &&
+                el.offsetWidth > 0 &&
+                el.offsetHeight > 0
+              )
+            })
+            .map((el) => ({
+              tag: el.tagName,
+              id: el.id,
+              className: el.className,
+              type: el.type,
+              value: el.value,
+              placeholder: el.placeholder,
+              text: el.textContent.trim().substring(0, 50),
+            }))
+        })
+
+        console.log("Éléments visibles sur la page:", JSON.stringify(visibleElements.slice(0, 20), null, 2))
 
         let usernameSelector = null
         let passwordSelector = null
