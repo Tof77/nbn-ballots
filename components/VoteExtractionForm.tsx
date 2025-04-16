@@ -10,22 +10,28 @@ import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Loader2, ShieldIcon, BugIcon } from "lucide-react"
+import { Loader2, ShieldIcon, BugIcon, WifiIcon, WifiOffIcon } from "lucide-react"
 import { encryptCredentials } from "@/utils/encryption"
 
 // Ajouter une nouvelle fonction pour réchauffer l'API Render avant l'extraction
-// Ajouter cette fonction après les imports et avant la définition du composant
-
-async function warmupRenderApi(): Promise<boolean> {
+async function warmupRenderApi(): Promise<{ success: boolean; status: string; message: string }> {
   try {
     console.log("Réchauffement de l'API Render...")
     const response = await fetch("/api/warmup-render")
     const data = await response.json()
     console.log("Résultat du réchauffement:", data)
-    return data.success === true
+    return {
+      success: data.success === true,
+      status: data.statusMessage || (data.success ? "active" : "inactive"),
+      message: data.message || "Statut de l'API inconnu",
+    }
   } catch (error) {
     console.error("Erreur lors du réchauffement:", error)
-    return false
+    return {
+      success: false,
+      status: "error",
+      message: error instanceof Error ? error.message : String(error),
+    }
   }
 }
 
@@ -44,6 +50,16 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
   const [publicKeyLoaded, setPublicKeyLoaded] = useState(false)
   const [debugInfo, setDebugInfo] = useState<string | null>(null)
   const [showDebug, setShowDebug] = useState(false)
+  const [renderApiStatus, setRenderApiStatus] = useState<{
+    status: "unknown" | "active" | "inactive" | "error"
+    message: string
+    lastChecked: Date | null
+  }>({
+    status: "unknown",
+    message: "Statut de l'API Render inconnu",
+    lastChecked: null,
+  })
+  const [isWarmingUp, setIsWarmingUp] = useState(false)
 
   // Vérifier que la clé publique est disponible au chargement du composant
   useEffect(() => {
@@ -63,8 +79,31 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
     checkPublicKey()
   }, [])
 
-  // Modifier la fonction handleSubmit pour utiliser le réchauffement
-  // Remplacer la fonction handleSubmit existante par celle-ci
+  // Vérifier l'état de l'API Render au chargement
+  useEffect(() => {
+    checkRenderApiStatus()
+  }, [])
+
+  // Fonction pour vérifier l'état de l'API Render
+  const checkRenderApiStatus = async () => {
+    setIsWarmingUp(true)
+    try {
+      const result = await warmupRenderApi()
+      setRenderApiStatus({
+        status: result.success ? "active" : result.status === "error" ? "error" : "inactive",
+        message: result.message,
+        lastChecked: new Date(),
+      })
+    } catch (error) {
+      setRenderApiStatus({
+        status: "error",
+        message: error instanceof Error ? error.message : String(error),
+        lastChecked: new Date(),
+      })
+    } finally {
+      setIsWarmingUp(false)
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -75,11 +114,19 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
     try {
       // Réchauffer l'API Render avant de l'utiliser
       setDebugInfo("Réchauffement de l'API Render...")
-      const warmupSuccess = await warmupRenderApi()
-      setDebugInfo((prev) => `${prev}\n\nRéchauffement de l'API Render: ${warmupSuccess ? "Succès" : "Échec"}`)
+      const warmupResult = await warmupRenderApi()
+      setRenderApiStatus({
+        status: warmupResult.success ? "active" : warmupResult.status === "error" ? "error" : "inactive",
+        message: warmupResult.message,
+        lastChecked: new Date(),
+      })
+      setDebugInfo(
+        (prev) =>
+          `${prev}\n\nRéchauffement de l'API Render: ${warmupResult.success ? "Succès" : "Échec"} - ${warmupResult.message}`,
+      )
 
       // Attendre un peu après le réchauffement
-      if (warmupSuccess) {
+      if (warmupResult.success) {
         setDebugInfo((prev) => `${prev}\nAttente de 2 secondes après le réchauffement...`)
         await new Promise((resolve) => setTimeout(resolve, 2000))
       }
@@ -152,6 +199,15 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
         json = JSON.parse(responseText)
         console.log("Réponse JSON parsée:", json)
         setDebugInfo((prev) => `${prev}\n\nRéponse JSON parsée: ${JSON.stringify(json, null, 2)}`)
+
+        // Mettre à jour le statut de l'API Render si disponible
+        if (json.renderApiStatus) {
+          setRenderApiStatus({
+            status: json.renderApiStatus === "available" ? "active" : "inactive",
+            message: json.renderApiMessage || `API Render ${json.renderApiStatus}`,
+            lastChecked: new Date(),
+          })
+        }
       } catch (parseError) {
         console.error("Erreur lors du parsing de la réponse JSON:", parseError)
         setDebugInfo(
@@ -182,6 +238,73 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
     }
   }
 
+  // Fonction pour afficher l'indicateur de statut de l'API Render
+  const renderApiStatusIndicator = () => {
+    const getIcon = () => {
+      switch (renderApiStatus.status) {
+        case "active":
+          return <WifiIcon className="h-4 w-4 text-green-500" />
+        case "inactive":
+          return <WifiOffIcon className="h-4 w-4 text-orange-500" />
+        case "error":
+          return <WifiOffIcon className="h-4 w-4 text-red-500" />
+        default:
+          return <WifiOffIcon className="h-4 w-4 text-gray-400" />
+      }
+    }
+
+    const getStatusText = () => {
+      switch (renderApiStatus.status) {
+        case "active":
+          return "API Render active"
+        case "inactive":
+          return "API Render inactive"
+        case "error":
+          return "Erreur de connexion à l'API Render"
+        default:
+          return "Statut de l'API Render inconnu"
+      }
+    }
+
+    const getStatusClass = () => {
+      switch (renderApiStatus.status) {
+        case "active":
+          return "bg-green-50 border-green-200 text-green-700"
+        case "inactive":
+          return "bg-orange-50 border-orange-200 text-orange-700"
+        case "error":
+          return "bg-red-50 border-red-200 text-red-700"
+        default:
+          return "bg-gray-50 border-gray-200 text-gray-700"
+      }
+    }
+
+    return (
+      <div className={`flex items-center gap-2 p-2 rounded-md border ${getStatusClass()} text-sm mb-4`}>
+        {isWarmingUp ? <Loader2 className="h-4 w-4 animate-spin" /> : getIcon()}
+        <div className="flex-1">
+          <p className="font-medium">{getStatusText()}</p>
+          <p className="text-xs">{renderApiStatus.message}</p>
+          {renderApiStatus.lastChecked && (
+            <p className="text-xs opacity-75">
+              Dernière vérification: {renderApiStatus.lastChecked.toLocaleTimeString()}
+            </p>
+          )}
+        </div>
+        <Button variant="outline" size="sm" onClick={checkRenderApiStatus} disabled={isWarmingUp} className="text-xs">
+          {isWarmingUp ? (
+            <span className="flex items-center gap-1">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Vérification...
+            </span>
+          ) : (
+            "Vérifier"
+          )}
+        </Button>
+      </div>
+    )
+  }
+
   return (
     <Card className="bg-white rounded-xl shadow p-6 mb-6">
       <h2 className="text-xl font-semibold mb-4">Extraction des votes</h2>
@@ -193,6 +316,9 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
           <AlertDescription>Veuillez patienter pendant que nous préparons le système de chiffrement.</AlertDescription>
         </Alert>
       )}
+
+      {/* Afficher l'indicateur de statut de l'API Render */}
+      {renderApiStatusIndicator()}
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 border border-gray-200 rounded-md bg-gray-50">
@@ -319,14 +445,39 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
             type="button"
             variant="outline"
             onClick={async () => {
+              setIsWarmingUp(true)
               setDebugInfo("Réchauffement manuel de l'API Render...")
-              const success = await warmupRenderApi()
-              setDebugInfo((prev) => `${prev}\n\nRéchauffement manuel: ${success ? "Succès" : "Échec"}`)
+              try {
+                const result = await warmupRenderApi()
+                setRenderApiStatus({
+                  status: result.success ? "active" : result.status === "error" ? "error" : "inactive",
+                  message: result.message,
+                  lastChecked: new Date(),
+                })
+                setDebugInfo(
+                  (prev) =>
+                    `${prev}\n\nRéchauffement manuel: ${result.success ? "Succès" : "Échec"} - ${result.message}`,
+                )
+              } catch (error) {
+                setDebugInfo(
+                  (prev) =>
+                    `${prev}\n\nErreur lors du réchauffement: ${error instanceof Error ? error.message : String(error)}`,
+                )
+              } finally {
+                setIsWarmingUp(false)
+              }
             }}
-            disabled={loading}
+            disabled={loading || isWarmingUp}
             className="text-sm"
           >
-            Réchauffer l'API Render
+            {isWarmingUp ? (
+              <span className="flex items-center gap-1">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Réchauffement...
+              </span>
+            ) : (
+              "Réchauffer l'API Render"
+            )}
           </Button>
 
           <Button type="submit" disabled={loading || !publicKeyLoaded} className="w-auto">
@@ -371,3 +522,4 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
     </Card>
   )
 }
+
