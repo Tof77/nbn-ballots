@@ -13,6 +13,11 @@ app.get("/", (req, res) => {
   res.json({ status: "API NBN Ballots opérationnelle" })
 })
 
+// Route pour maintenir le service actif (ping)
+app.get("/ping", (req, res) => {
+  res.json({ status: "pong", timestamp: new Date().toISOString() })
+})
+
 // Fonction pour déchiffrer les données simulées
 function simulateDecryption(encryptedData) {
   try {
@@ -447,7 +452,21 @@ app.post("/api/extract-votes", async (req, res) => {
                   if (header.includes("ref") || header.includes("reference")) {
                     rowData.ref = text
                     rowData.title = link ? link.title || text : text
-                    if (href) rowData.detailsUrl = href
+                    if (href) {
+                      rowData.detailsUrl = href
+
+                      // Extraire l'ID du vote à partir de l'URL ou du lien JavaScript
+                      const idMatch = href.match(/id=(\d+)/) || href.match(/(\d+)/)
+                      if (idMatch && idMatch[1]) {
+                        rowData.voteId = idMatch[1]
+                      }
+
+                      // Déterminer le type de vote (npos, ncib, etc.) à partir de l'URL ou du lien JavaScript
+                      const typeMatch = href.match(/'([^']+)','doView'/) || href.match(/\/([^/]+)\/ballotAction\.do/)
+                      if (typeMatch && typeMatch[1]) {
+                        rowData.voteType = typeMatch[1]
+                      }
+                    }
                   } else if (header.includes("committee")) {
                     rowData.committee = text
                   } else if (header.includes("vote")) {
@@ -488,16 +507,47 @@ app.post("/api/extract-votes", async (req, res) => {
             const vote = votes[i]
 
             // Vérifier si le vote a des détails à extraire et une URL de détails
-            if (vote.votes && vote.votes.includes("vote") && vote.detailsUrl) {
+            if (vote.votes && vote.votes.includes("vote")) {
               console.log(`Extraction des détails pour le vote ${i + 1}/${votes.length}: ${vote.ref}`)
 
               try {
-                // Naviguer vers la page de détails
-                await page.goto(vote.detailsUrl, { waitUntil: "networkidle2", timeout: 30000 }).catch(async (error) => {
-                  console.error(`Erreur lors de la navigation vers les détails du vote ${vote.ref}:`, error)
-                  // Continuer avec le vote suivant
-                  return
-                })
+                // Essayer d'abord d'utiliser l'ID et le type du vote si disponibles
+                if (vote.voteId && vote.voteType) {
+                  const detailsUrl = `https://isolutions.iso.org/ballots/part/${vote.voteType}/ballotAction.do?method=doView&id=${vote.voteId}`
+                  console.log(`Navigation vers: ${detailsUrl}`)
+
+                  // Naviguer vers la page de détails
+                  await page.goto(detailsUrl, { waitUntil: "networkidle2", timeout: 30000 })
+                } else if (vote.detailsUrl) {
+                  // Sinon, utiliser l'URL de détails originale
+                  console.log(`Navigation vers les détails du vote ${vote.ref}`)
+
+                  // Naviguer vers la page de détails
+                  await page
+                    .goto(vote.detailsUrl, { waitUntil: "networkidle2", timeout: 30000 })
+                    .catch(async (error) => {
+                      console.error(`Erreur lors de la navigation vers les détails du vote ${vote.ref}:`, error)
+
+                      // Si l'URL est un javascript:, essayer d'extraire l'ID et le type
+                      if (vote.detailsUrl.startsWith("javascript:")) {
+                        const jsMatch = vote.detailsUrl.match(/'([^']+)','doView', (\d+)/)
+                        if (jsMatch && jsMatch[1] && jsMatch[2]) {
+                          const voteType = jsMatch[1]
+                          const voteId = jsMatch[2]
+                          const directUrl = `https://isolutions.iso.org/ballots/part/${voteType}/ballotAction.do?method=doView&id=${voteId}`
+                          console.log(`Tentative avec URL directe: ${directUrl}`)
+                          await page.goto(directUrl, { waitUntil: "networkidle2", timeout: 30000 })
+                        } else {
+                          throw new Error(`Impossible d'extraire l'ID et le type du vote depuis l'URL JavaScript`)
+                        }
+                      } else {
+                        throw error
+                      }
+                    })
+                } else {
+                  console.log(`Pas d'URL de détails disponible pour le vote ${vote.ref}, passage au suivant`)
+                  continue
+                }
 
                 // Attendre que la page de détails soit chargée
                 await delay(5000)
@@ -512,89 +562,84 @@ app.post("/api/extract-votes", async (req, res) => {
                 }
 
                 // Extraire les détails du vote
-                vote.voteDetails = await page
-                  .evaluate(() => {
-                    // Trouver le tableau des détails
-                    const tables = Array.from(document.querySelectorAll("table"))
-                    let detailsTable = null
+                vote.voteDetails = await page.evaluate(() => {
+                  // Trouver le tableau des détails
+                  const tables = Array.from(document.querySelectorAll("table"))
+                  let detailsTable = null
 
-                    // Chercher le tableau qui contient les détails des votes
-                    for (const table of tables) {
-                      const headers = Array.from(table.querySelectorAll("th")).map((th) =>
-                        th.innerText.trim().toLowerCase(),
-                      )
-                      if (
-                        headers.some(
-                          (h) =>
-                            h.includes("participant") || h.includes("vote") || h.includes("cast") || h.includes("date"),
-                        )
-                      ) {
-                        detailsTable = table
-                        break
-                      }
-                    }
-
-                    if (!detailsTable) return []
-
-                    // Récupérer les en-têtes
-                    const headers = Array.from(detailsTable.querySelectorAll("th")).map((th) =>
+                  // Chercher le tableau qui contient les détails des votes
+                  for (const table of tables) {
+                    const headers = Array.from(table.querySelectorAll("th")).map((th) =>
                       th.innerText.trim().toLowerCase(),
                     )
+                    if (
+                      headers.some(
+                        (h) =>
+                          h.includes("participant") || h.includes("vote") || h.includes("cast") || h.includes("date"),
+                      )
+                    ) {
+                      detailsTable = table
+                      break
+                    }
+                  }
 
-                    // Récupérer les lignes de données
-                    const rows = Array.from(detailsTable.querySelectorAll("tbody tr, tr:not(:first-child)"))
+                  if (!detailsTable) return []
 
-                    // Extraire les données de chaque ligne
-                    return rows
-                      .map((row) => {
-                        const cells = Array.from(row.querySelectorAll("td"))
-                        if (cells.length < 3) return null // Ignorer les lignes avec trop peu de cellules
+                  // Récupérer les en-têtes
+                  const headers = Array.from(detailsTable.querySelectorAll("th")).map((th) =>
+                    th.innerText.trim().toLowerCase(),
+                  )
 
-                        // Créer un objet pour stocker les données
-                        const rowData = {
-                          participant: "",
-                          vote: "",
-                          castBy: "",
-                          date: "",
+                  // Récupérer les lignes de données
+                  const rows = Array.from(detailsTable.querySelectorAll("tbody tr, tr:not(:first-child)"))
+
+                  // Extraire les données de chaque ligne
+                  return rows
+                    .map((row) => {
+                      const cells = Array.from(row.querySelectorAll("td"))
+                      if (cells.length < 3) return null // Ignorer les lignes avec trop peu de cellules
+
+                      // Créer un objet pour stocker les données
+                      const rowData = {
+                        participant: "",
+                        vote: "",
+                        castBy: "",
+                        date: "",
+                      }
+
+                      // Associer les cellules aux en-têtes
+                      cells.forEach((cell, i) => {
+                        const header = headers[i] || `column${i}`
+                        const text = cell.innerText.trim()
+
+                        // Déterminer le type de données
+                        if (header.includes("participant") || header.includes("country")) {
+                          rowData.participant = text
+                        } else if (header.includes("vote")) {
+                          rowData.vote = text
+                        } else if (header.includes("cast") || header.includes("by") || header.includes("user")) {
+                          rowData.castBy = text
+                        } else if (header.includes("date")) {
+                          rowData.date = text
+                        } else if (i === 0) {
+                          // Première colonne, probablement le participant
+                          rowData.participant = text
+                        } else if (i === 1) {
+                          // Deuxième colonne, probablement le vote
+                          rowData.vote = text
+                        } else if (i === 2) {
+                          // Troisième colonne, probablement qui a voté
+                          rowData.castBy = text
+                        } else if (i === 3) {
+                          // Quatrième colonne, probablement la date
+                          rowData.date = text
                         }
-
-                        // Associer les cellules aux en-têtes
-                        cells.forEach((cell, i) => {
-                          const header = headers[i] || `column${i}`
-                          const text = cell.innerText.trim()
-
-                          // Déterminer le type de données
-                          if (header.includes("participant") || header.includes("country")) {
-                            rowData.participant = text
-                          } else if (header.includes("vote")) {
-                            rowData.vote = text
-                          } else if (header.includes("cast") || header.includes("by") || header.includes("user")) {
-                            rowData.castBy = text
-                          } else if (header.includes("date")) {
-                            rowData.date = text
-                          } else if (i === 0) {
-                            // Première colonne, probablement le participant
-                            rowData.participant = text
-                          } else if (i === 1) {
-                            // Deuxième colonne, probablement le vote
-                            rowData.vote = text
-                          } else if (i === 2) {
-                            // Troisième colonne, probablement qui a voté
-                            rowData.castBy = text
-                          } else if (i === 3) {
-                            // Quatrième colonne, probablement la date
-                            rowData.date = text
-                          }
-                        })
-
-                        return rowData
                       })
-                      .filter(Boolean) // Filtrer les lignes nulles
-                  })
-                  .catch((e) => {
-                    console.log(`Erreur lors de l'extraction des détails: ${e.message}`)
-                    return []
-                  })
+
+                      return rowData
+                    })
+                    .filter(Boolean) // Filtrer les lignes nulles
+                })
 
                 console.log(`${vote.voteDetails.length} détails extraits pour le vote ${vote.ref}`)
               } catch (error) {
@@ -1022,7 +1067,21 @@ app.post("/api/extract-votes", async (req, res) => {
                   if (header.includes("ref") || header.includes("reference")) {
                     rowData.ref = text
                     rowData.title = link ? link.title || text : text
-                    if (href) rowData.detailsUrl = href
+                    if (href) {
+                      rowData.detailsUrl = href
+
+                      // Extraire l'ID du vote à partir de l'URL ou du lien JavaScript
+                      const idMatch = href.match(/id=(\d+)/) || href.match(/(\d+)/)
+                      if (idMatch && idMatch[1]) {
+                        rowData.voteId = idMatch[1]
+                      }
+
+                      // Déterminer le type de vote (npos, ncib, etc.) à partir de l'URL ou du lien JavaScript
+                      const typeMatch = href.match(/'([^']+)','doView'/) || href.match(/\/([^/]+)\/ballotAction\.do/)
+                      if (typeMatch && typeMatch[1]) {
+                        rowData.voteType = typeMatch[1]
+                      }
+                    }
                   } else if (header.includes("committee")) {
                     rowData.committee = text
                   } else if (header.includes("vote")) {
