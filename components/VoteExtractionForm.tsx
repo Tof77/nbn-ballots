@@ -13,6 +13,22 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Loader2, ShieldIcon, BugIcon } from "lucide-react"
 import { encryptCredentials } from "@/utils/encryption"
 
+// Ajouter une nouvelle fonction pour réchauffer l'API Render avant l'extraction
+// Ajouter cette fonction après les imports et avant la définition du composant
+
+async function warmupRenderApi(): Promise<boolean> {
+  try {
+    console.log("Réchauffement de l'API Render...")
+    const response = await fetch("/api/warmup-render")
+    const data = await response.json()
+    console.log("Résultat du réchauffement:", data)
+    return data.success === true
+  } catch (error) {
+    console.error("Erreur lors du réchauffement:", error)
+    return false
+  }
+}
+
 interface VoteExtractionFormProps {
   onResultsReceived: (results: any[]) => void
 }
@@ -47,7 +63,8 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
     checkPublicKey()
   }, [])
 
-  // Dans la fonction handleSubmit, ajoutons plus de logs pour le débogage
+  // Modifier la fonction handleSubmit pour utiliser le réchauffement
+  // Remplacer la fonction handleSubmit existante par celle-ci
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -56,6 +73,17 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
     setDebugInfo(null)
 
     try {
+      // Réchauffer l'API Render avant de l'utiliser
+      setDebugInfo("Réchauffement de l'API Render...")
+      const warmupSuccess = await warmupRenderApi()
+      setDebugInfo((prev) => `${prev}\n\nRéchauffement de l'API Render: ${warmupSuccess ? "Succès" : "Échec"}`)
+
+      // Attendre un peu après le réchauffement
+      if (warmupSuccess) {
+        setDebugInfo((prev) => `${prev}\nAttente de 2 secondes après le réchauffement...`)
+        await new Promise((resolve) => setTimeout(resolve, 2000))
+      }
+
       // Chiffrer les identifiants avant de les envoyer
       const { encryptedUsername, encryptedPassword } = await encryptCredentials(username, password)
 
@@ -80,7 +108,7 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
       }
 
       console.log("Données envoyées à l'API:", debugRequestData)
-      setDebugInfo(`Données envoyées à l'API: ${JSON.stringify(debugRequestData, null, 2)}`)
+      setDebugInfo((prev) => `${prev}\n\nDonnées envoyées à l'API: ${JSON.stringify(debugRequestData, null, 2)}`)
 
       // Utiliser directement l'API sans passer par le middleware pour le débogage
       const apiUrl = "/api/extract-votes"
@@ -114,12 +142,7 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
       console.log("Réponse brute de l'API:", responseText)
       setDebugInfo((prev) => `${prev}\n\nRéponse brute de l'API: ${responseText}`)
 
-      let json: {
-        votes: any[];
-        debug?: any;
-        error?: string;
-        details?: string;
-      }
+      let json
       try {
         json = JSON.parse(responseText)
         console.log("Réponse JSON parsée:", json)
@@ -286,8 +309,22 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
           </Alert>
         )}
 
-        <div className="pt-2">
-          <Button type="submit" disabled={loading || !publicKeyLoaded} className="w-full">
+        <div className="flex justify-between items-center pt-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={async () => {
+              setDebugInfo("Réchauffement manuel de l'API Render...")
+              const success = await warmupRenderApi()
+              setDebugInfo((prev) => `${prev}\n\nRéchauffement manuel: ${success ? "Succès" : "Échec"}`)
+            }}
+            disabled={loading}
+            className="text-sm"
+          >
+            Réchauffer l'API Render
+          </Button>
+
+          <Button type="submit" disabled={loading || !publicKeyLoaded} className="w-auto">
             {loading ? (
               <span className="flex items-center">
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -298,7 +335,7 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
                 {publicKeyLoaded ? (
                   <>
                     <ShieldIcon className="mr-2 h-4 w-4" />
-                    Extraire les votes (connexion sécurisée)
+                    Extraire les votes
                   </>
                 ) : (
                   "Chargement du système de sécurité..."
