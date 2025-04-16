@@ -57,15 +57,26 @@ function extractCommissionCode(commissionId: string): string {
 }
 
 export async function POST(req: NextRequest) {
+  const diagnostics: string[] = []
+  const startTime = Date.now()
+
   try {
     // Récupérer et journaliser les données brutes
     const requestData = await req.json()
+    diagnostics.push("Données reçues dans l'API Edge")
 
     // URL de votre API Render
     const renderApiUrl = process.env.RENDER_API_URL
+    diagnostics.push(`RENDER_API_URL: ${renderApiUrl || "non définie"}`)
+
     if (renderApiUrl) {
       try {
-        console.log("API - Redirection vers l'API Render:", renderApiUrl)
+        diagnostics.push(`Tentative d'appel à l'API Render depuis l'API Edge: ${renderApiUrl}/api/extract-votes`)
+
+        // Ajouter une note concernant la possibilité d'une fenêtre GDPR
+        diagnostics.push(
+          "Note: Si l'API ne répond pas, il est possible qu'une fenêtre de confirmation GDPR soit affichée sur le serveur Render.",
+        )
 
         // Appeler l'API Render
         const response = await fetch(`${renderApiUrl}/api/extract-votes`, {
@@ -83,32 +94,46 @@ export async function POST(req: NextRequest) {
         try {
           responseData = JSON.parse(responseText)
         } catch (error) {
+          diagnostics.push(
+            `Erreur lors du parsing de la réponse JSON: ${error instanceof Error ? error.message : String(error)}`,
+          )
           return NextResponse.json(
             {
               error: "Format de réponse invalide",
               details: "La réponse de l'API externe n'est pas un JSON valide",
               receivedResponse: responseText.substring(0, 500) + "...", // Afficher les 500 premiers caractères
+              diagnostics,
             },
             { status: 502 },
           )
         }
 
         if (!response.ok) {
+          diagnostics.push(`Erreur de l'API Render: ${JSON.stringify(responseData, null, 2)}`)
           return NextResponse.json(
             {
               error: "Erreur de l'API Render",
               details: responseData.error || `Statut HTTP: ${response.status}`,
+              diagnostics,
             },
             { status: 502 },
           )
         }
 
+        // Ajouter les diagnostics à la réponse
+        if (!responseData.diagnostics) {
+          responseData.diagnostics = diagnostics
+        }
+
         return NextResponse.json(responseData)
       } catch (error) {
-        console.log("API - Utilisation des données simulées en fallback")
+        diagnostics.push(
+          `Erreur lors de l'appel à l'API Render: ${error instanceof Error ? error.message : String(error)}`,
+        )
+        diagnostics.push("Utilisation des données simulées en fallback")
       }
     } else {
-      console.log("API - RENDER_API_URL non définie, utilisation des données simulées")
+      diagnostics.push("RENDER_API_URL non définie, utilisation des données simulées")
     }
 
     // Si l'API Render n'est pas disponible ou si une erreur s'est produite, utiliser les données simulées
@@ -119,6 +144,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           error: "Identifiants chiffrés manquants",
+          diagnostics,
         },
         { status: 400 },
       )
@@ -130,11 +156,14 @@ export async function POST(req: NextRequest) {
       // Déchiffrer les identifiants simulés
       username = simulateDecryption(credentials.encryptedUsername)
       password = simulateDecryption(credentials.encryptedPassword)
+      diagnostics.push("Identifiants déchiffrés avec succès")
     } catch (error) {
+      diagnostics.push(`Erreur lors du déchiffrement: ${error instanceof Error ? error.message : String(error)}`)
       return NextResponse.json(
         {
           error: "Échec du déchiffrement des identifiants",
           details: error instanceof Error ? error.message : String(error),
+          diagnostics,
         },
         { status: 400 },
       )
@@ -142,6 +171,7 @@ export async function POST(req: NextRequest) {
 
     // Extraire le code de commission
     const commissionCode = extractCommissionCode(commissionId)
+    diagnostics.push(`Code de commission extrait: ${commissionCode}`)
 
     // Générer des données réalistes basées sur la capture d'écran fournie
     const votes: Vote[] = []
@@ -155,7 +185,7 @@ export async function POST(req: NextRequest) {
           ref: "ISO/DIS 21239",
           title: "ISO/DIS 21239 - Building Information Modeling",
           committee: "Buildwise/E088/089",
-          votes: "-",
+          votes: "",
           result: "Closed without votes",
           status: "Closed",
           openingDate: "2024-12-24",
@@ -167,10 +197,10 @@ export async function POST(req: NextRequest) {
         },
         {
           id: "e088-2",
-          ref: "EN ISO 52016-3:2023/prA1",
+          ref: "EN ISO 52016-3 2023/prA1",
           title: "Energy performance of buildings - Energy needs for heating and cooling",
           committee: "Buildwise/E088/089",
-          votes: "-",
+          votes: "",
           result: "Closed without votes",
           status: "Closed",
           openingDate: "2024-12-24",
@@ -185,7 +215,7 @@ export async function POST(req: NextRequest) {
           ref: "ISO 52016-3 2023/DAmd 1",
           title: "Energy performance of buildings - Amendment 1",
           committee: "Buildwise/E088/089",
-          votes: "-",
+          votes: "",
           result: "Closed without votes",
           status: "Closed",
           openingDate: "2024-12-27",
@@ -200,7 +230,7 @@ export async function POST(req: NextRequest) {
           ref: "FprEN 17990",
           title: "Sustainability of construction works",
           committee: "Buildwise/E088/089",
-          votes: "-",
+          votes: "",
           result: "Closed without votes",
           status: "Closed",
           openingDate: "2025-01-28",
@@ -215,7 +245,7 @@ export async function POST(req: NextRequest) {
           ref: "Draft Decision 975c/2025 - Adoption of NWI pending behaviour",
           title: "Adoption of New Work Item - Pending behaviour",
           committee: "Buildwise/E088/089",
-          votes: "-",
+          votes: "",
           result: "Abstention",
           status: "Closed",
           openingDate: "2025-01-29",
@@ -385,6 +415,9 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const totalDuration = Date.now() - startTime
+    diagnostics.push(`Durée totale de traitement: ${totalDuration}ms`)
+
     return NextResponse.json({
       votes,
       debug: {
@@ -393,14 +426,20 @@ export async function POST(req: NextRequest) {
         username: username,
         startDate: startDate,
         numVotesGenerated: votes.length,
-        source: "fallback",
+        source: "edge-fallback",
       },
+      diagnostics,
+      renderApiStatus: "unavailable",
     })
   } catch (error) {
+    const totalDuration = Date.now() - startTime
+    diagnostics.push(`Durée totale jusqu'à l'erreur: ${totalDuration}ms`)
+    diagnostics.push(`Erreur générale: ${error instanceof Error ? error.message : String(error)}`)
     return NextResponse.json(
       {
         error: "Erreur lors de l'extraction des votes",
         details: error instanceof Error ? error.message : String(error),
+        diagnostics,
       },
       { status: 500 },
     )
