@@ -40,9 +40,18 @@ function extractCommissionCode(commissionId) {
   return "Unknown"
 }
 
+// Fonction pour capturer le HTML de la page pour le débogage
+async function capturePageHtml(page, path) {
+  const html = await page.content()
+  const fs = require("fs")
+  fs.writeFileSync(path, html)
+  console.log(`HTML capturé et enregistré dans ${path}`)
+}
+
 // Route principale pour l'extraction des votes
 app.post("/api/extract-votes", async (req, res) => {
   console.log("Requête d'extraction reçue")
+  let browser = null
 
   try {
     const { commissionId, startDate, extractDetails = true, credentials } = req.body
@@ -77,38 +86,161 @@ app.post("/api/extract-votes", async (req, res) => {
     // Lancer Puppeteer pour l'extraction
     console.log("Lancement de Puppeteer...")
 
-    // Avec l'image Docker, nous n'avons pas besoin de spécifier des arguments spéciaux
-    const browser = await puppeteer.launch({
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    // Configuration de Puppeteer avec des options améliorées
+    browser = await puppeteer.launch({
+      headless: true, // Mettre à false pour le débogage visuel
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-accelerated-2d-canvas",
+        "--disable-gpu",
+        "--window-size=1920,1080",
+      ],
+      defaultViewport: { width: 1920, height: 1080 },
+      timeout: 60000, // Timeout global de 60 secondes
     })
 
     try {
       const page = await browser.newPage()
 
+      // Configurer les timeouts de navigation
+      page.setDefaultNavigationTimeout(30000)
+      page.setDefaultTimeout(30000)
+
+      // Activer la journalisation de la console du navigateur
+      page.on("console", (msg) => console.log("Console du navigateur:", msg.text()))
+
+      // Intercepter les erreurs de page
+      page.on("pageerror", (error) => {
+        console.error("Erreur de page:", error.message)
+      })
+
       // Naviguer vers la page de connexion
       console.log("Navigation vers isolutions.iso.org...")
-      await page.goto("https://isolutions.iso.org/eballot/app/", { waitUntil: "networkidle2" })
+      await page.goto("https://isolutions.iso.org/eballot/app/", {
+        waitUntil: "networkidle2",
+        timeout: 30000,
+      })
+
+      // Attendre un peu pour s'assurer que la page est complètement chargée
+      await page.waitForTimeout(3000)
 
       // Prendre une capture d'écran pour le débogage
-      await page.screenshot({ path: "/tmp/login-page.png" })
+      await page.screenshot({ path: "/tmp/login-page-before.png" })
+
+      // Capturer le HTML pour le débogage
+      await capturePageHtml(page, "/tmp/login-page-html.txt")
 
       // Se connecter
       console.log("Tentative de connexion...")
-      // Mise à jour des sélecteurs pour la page de connexion ISO
-      await page.type("#username", username)
-      await page.type("#password", password)
 
-      // Cliquer sur le bouton de connexion et attendre la navigation
-      // Utiliser le sélecteur correct pour le bouton de connexion
-      await Promise.all([page.click("#kc-login"), page.waitForNavigation({ waitUntil: "networkidle2" })])
+      // Vérifier si la page contient un iframe de connexion
+      const hasLoginIframe = await page.evaluate(() => {
+        return !!document.querySelector("iframe")
+      })
+
+      if (hasLoginIframe) {
+        console.log("Iframe de connexion détecté, passage au contexte de l'iframe...")
+
+        // Attendre que l'iframe soit chargé
+        await page.waitForSelector("iframe", { timeout: 10000 })
+
+        // Obtenir le premier iframe
+        const frameHandle = await page.$("iframe")
+        const frame = await frameHandle.contentFrame()
+
+        // Attendre que les champs de connexion soient disponibles dans l'iframe
+        await frame.waitForSelector("#username", { timeout: 10000 })
+        await frame.waitForSelector("#password", { timeout: 10000 })
+
+        // Remplir les champs de connexion dans l'iframe
+        await frame.type("#username", username)
+        await frame.type("#password", password)
+
+        // Cliquer sur le bouton de connexion dans l'iframe
+        await Promise.all([
+          frame.click("#kc-login"),
+          page.waitForNavigation({ waitUntil: "networkidle2", timeout: 30000 }),
+        ])
+      } else {
+        // Essayer différentes combinaisons de sélecteurs pour les champs de connexion
+        const usernameSelectors = ["#username", 'input[name="username"]', 'input[type="text"]', 'input[id="username"]']
+        const passwordSelectors = [
+          "#password",
+          'input[name="password"]',
+          'input[type="password"]',
+          'input[id="password"]',
+        ]
+        const loginButtonSelectors = ["#kc-login", 'input[type="submit"]', 'button[type="submit"]', "button.submit"]
+
+        let usernameSelector = null
+        let passwordSelector = null
+        let loginButtonSelector = null
+
+        // Trouver les sélecteurs qui fonctionnent
+        for (const selector of usernameSelectors) {
+          if (await page.$(selector)) {
+            usernameSelector = selector
+            console.log(`Sélecteur de nom d'utilisateur trouvé: ${selector}`)
+            break
+          }
+        }
+
+        for (const selector of passwordSelectors) {
+          if (await page.$(selector)) {
+            passwordSelector = selector
+            console.log(`Sélecteur de mot de passe trouvé: ${selector}`)
+            break
+          }
+        }
+
+        for (const selector of loginButtonSelectors) {
+          if (await page.$(selector)) {
+            loginButtonSelector = selector
+            console.log(`Sélecteur de bouton de connexion trouvé: ${selector}`)
+            break
+          }
+        }
+
+        if (!usernameSelector || !passwordSelector || !loginButtonSelector) {
+          // Prendre une capture d'écran pour le débogage
+          await page.screenshot({ path: "/tmp/login-page-selectors-not-found.png" })
+
+          // Capturer le HTML pour le débogage
+          await capturePageHtml(page, "/tmp/login-page-selectors-not-found.html")
+
+          throw new Error("Impossible de trouver les sélecteurs pour la page de connexion. HTML capturé pour analyse.")
+        }
+
+        // Remplir les champs de connexion
+        await page.type(usernameSelector, username)
+        await page.type(passwordSelector, password)
+
+        // Cliquer sur le bouton de connexion et attendre la navigation
+        await Promise.all([
+          page.click(loginButtonSelector),
+          page.waitForNavigation({ waitUntil: "networkidle2", timeout: 30000 }),
+        ]).catch(async (error) => {
+          console.error("Erreur lors de la navigation après connexion:", error)
+          // Continuer quand même, car parfois la navigation ne se produit pas comme prévu
+          await page.waitForTimeout(5000)
+        })
+      }
 
       // Prendre une capture d'écran après la connexion
       await page.screenshot({ path: "/tmp/after-login.png" })
 
+      // Capturer le HTML après la connexion
+      await capturePageHtml(page, "/tmp/after-login-html.txt")
+
       // Vérifier si la connexion a réussi
       const isLoggedIn = await page.evaluate(() => {
-        return !document.querySelector("div.error-message")
+        return (
+          !document.querySelector("div.error-message") &&
+          !document.querySelector(".alert-error") &&
+          !document.querySelector(".login-error")
+        )
       })
 
       if (!isLoggedIn) {
@@ -118,15 +250,41 @@ app.post("/api/extract-votes", async (req, res) => {
       console.log("Connexion réussie!")
 
       // Naviguer vers la page de recherche
-      await page.goto("https://isolutions.iso.org/eballot/app/", { waitUntil: "networkidle2" })
+      await page.goto("https://isolutions.iso.org/eballot/app/", {
+        waitUntil: "networkidle2",
+        timeout: 30000,
+      })
+
+      // Attendre que la page soit chargée
+      await page.waitForTimeout(3000)
+
+      // Capturer l'état de la page avant la sélection de la commission
+      await page.screenshot({ path: "/tmp/before-committee-selection.png" })
+      await capturePageHtml(page, "/tmp/before-committee-selection.html")
 
       // Sélectionner la commission
       console.log(`Sélection de la commission: ${commissionId}`)
+
+      // Attendre que le sélecteur de commission soit disponible
+      await page.waitForSelector('select[name="committee"]', { timeout: 10000 }).catch(async (error) => {
+        console.error("Erreur lors de l'attente du sélecteur de commission:", error)
+        await page.screenshot({ path: "/tmp/committee-selector-error.png" })
+        await capturePageHtml(page, "/tmp/committee-selector-error.html")
+        throw new Error("Sélecteur de commission non trouvé")
+      })
+
       await page.select('select[name="committee"]', commissionId)
 
       // Définir la date
       if (startDate) {
         console.log(`Définition de la date: ${startDate}`)
+        await page.waitForSelector('input[name="closingDateFrom"]', { timeout: 10000 }).catch(async (error) => {
+          console.error("Erreur lors de l'attente du sélecteur de date:", error)
+          await page.screenshot({ path: "/tmp/date-selector-error.png" })
+          await capturePageHtml(page, "/tmp/date-selector-error.html")
+          throw new Error("Sélecteur de date non trouvé")
+        })
+
         await page.evaluate((date) => {
           const input = document.querySelector('input[name="closingDateFrom"]')
           if (input) input.value = date
@@ -135,10 +293,27 @@ app.post("/api/extract-votes", async (req, res) => {
 
       // Lancer la recherche
       console.log("Lancement de la recherche...")
-      await Promise.all([page.click('button[type="submit"]'), page.waitForNavigation({ waitUntil: "networkidle2" })])
+
+      // Attendre que le bouton de recherche soit disponible
+      await page.waitForSelector('button[type="submit"]', { timeout: 10000 }).catch(async (error) => {
+        console.error("Erreur lors de l'attente du bouton de recherche:", error)
+        await page.screenshot({ path: "/tmp/search-button-error.png" })
+        await capturePageHtml(page, "/tmp/search-button-error.html")
+        throw new Error("Bouton de recherche non trouvé")
+      })
+
+      await Promise.all([
+        page.click('button[type="submit"]'),
+        page.waitForNavigation({ waitUntil: "networkidle2", timeout: 30000 }),
+      ]).catch(async (error) => {
+        console.error("Erreur lors de la navigation après recherche:", error)
+        // Continuer quand même, car parfois la navigation ne se produit pas comme prévu
+        await page.waitForTimeout(5000)
+      })
 
       // Prendre une capture d'écran des résultats
       await page.screenshot({ path: "/tmp/search-results.png" })
+      await capturePageHtml(page, "/tmp/search-results.html")
 
       // Attendre que le tableau des résultats soit chargé
       await page.waitForSelector("table.ballotList", { timeout: 10000 }).catch(() => {
@@ -151,13 +326,14 @@ app.post("/api/extract-votes", async (req, res) => {
         const results = []
         const rows = document.querySelectorAll("table.ballotList tr:not(:first-child)")
 
-        rows.forEach((row) => {
+        rows.forEach((row, index) => {
           const cells = row.querySelectorAll("td")
           if (cells.length < 8) return
 
           const refElement = cells[2].querySelector("a")
 
           results.push({
+            id: `vote-${index + 1}`,
             ref: refElement ? refElement.textContent.trim() : "",
             title: refElement ? refElement.getAttribute("title") : "",
             committee: cells[1].textContent.trim(),
@@ -199,7 +375,17 @@ app.post("/api/extract-votes", async (req, res) => {
 
             if (detailsLink) {
               // Naviguer vers la page de détails
-              await page.goto(detailsLink, { waitUntil: "networkidle2" })
+              await page.goto(detailsLink, { waitUntil: "networkidle2", timeout: 30000 }).catch(async (error) => {
+                console.error(`Erreur lors de la navigation vers les détails du vote ${vote.ref}:`, error)
+                // Continuer avec le vote suivant
+                return
+              })
+
+              // Attendre que la page de détails soit chargée
+              await page.waitForTimeout(2000)
+
+              // Prendre une capture d'écran de la page de détails
+              await page.screenshot({ path: `/tmp/vote-details-${i}.png` })
 
               // Extraire les détails
               vote.voteDetails = await page.evaluate(() => {
@@ -224,7 +410,14 @@ app.post("/api/extract-votes", async (req, res) => {
               console.log(`${vote.voteDetails.length} détails extraits pour le vote ${vote.ref}`)
 
               // Revenir à la page des résultats
-              await page.goBack()
+              await page.goBack({ waitUntil: "networkidle2", timeout: 30000 }).catch(async (error) => {
+                console.error(`Erreur lors du retour à la page des résultats après le vote ${vote.ref}:`, error)
+                // Naviguer directement vers la page des résultats
+                await page.goto("https://isolutions.iso.org/eballot/app/", {
+                  waitUntil: "networkidle2",
+                  timeout: 30000,
+                })
+              })
             } else {
               console.log(`Lien de détails non trouvé pour le vote ${vote.ref}`)
               vote.voteDetails = []
@@ -237,6 +430,7 @@ app.post("/api/extract-votes", async (req, res) => {
 
       // Fermer le navigateur
       await browser.close()
+      browser = null
 
       // Retourner les résultats
       return res.json({
@@ -253,7 +447,10 @@ app.post("/api/extract-votes", async (req, res) => {
       console.error("Erreur lors de l'extraction:", error)
 
       // Fermer le navigateur en cas d'erreur
-      await browser.close()
+      if (browser) {
+        await browser.close()
+        browser = null
+      }
 
       return res.status(500).json({
         error: "Erreur lors de l'extraction des votes",
@@ -262,6 +459,13 @@ app.post("/api/extract-votes", async (req, res) => {
     }
   } catch (error) {
     console.error("Erreur générale:", error)
+
+    // S'assurer que le navigateur est fermé en cas d'erreur
+    if (browser) {
+      await browser.close()
+      browser = null
+    }
+
     return res.status(500).json({
       error: "Erreur lors de l'extraction des votes",
       details: error.message,
