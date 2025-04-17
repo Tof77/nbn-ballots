@@ -12,11 +12,10 @@
     },
     "app/api/warmup-render/route.ts": {
       "memory": 1024,
-      "maxDuration": 60
+      "maxDuration": 70
     }
   },
   "env": {
     "RENDER_API_URL": "https://nbn-ballots-api.onrender.com"
   }
 }
-
