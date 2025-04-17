@@ -82,6 +82,24 @@ async function waitForNavigationSafely(page, options = {}) {
   }
 }
 
+// Fonction pour améliorer la sélection d'éléments avec des sélecteurs complexes
+async function enhancedQuerySelector(page, selector, textContent) {
+  return page.evaluate(
+    (selector, textContent) => {
+      // Si un sélecteur standard est fourni, l'utiliser directement
+      if (!textContent) {
+        return document.querySelector(selector) !== null
+      }
+
+      // Sinon, rechercher par contenu de texte
+      const elements = Array.from(document.querySelectorAll(selector))
+      return elements.some((el) => el.textContent.includes(textContent))
+    },
+    selector,
+    textContent,
+  )
+}
+
 // Route principale pour l'extraction des votes
 app.post("/api/extract-votes", async (req, res) => {
   console.log("Requête d'extraction reçue")
@@ -583,7 +601,159 @@ app.post("/api/extract-votes", async (req, res) => {
                     }
                   }
 
-                  if (!detailsTable) return []
+                  // Extraire les informations supplémentaires des tableaux spécifiques
+                  const additionalInfo = {
+                    openingDate: "",
+                    committeeClosingDate: "",
+                    committee: "",
+                    cenIsoClosingDate: "",
+                    title: "",
+                  }
+
+                  // Extraire les informations du tableau #cmBalInfoArea
+                  const infoTable = document.getElementById("cmBalInfoArea")
+                  if (infoTable) {
+                    // Extraire Opening date
+                    const openingDateCell = infoTable.querySelector(
+                      'td.label[nowrap=""][nowrap]:contains("Opening date:")',
+                    )
+                    if (openingDateCell) {
+                      const nextCell = openingDateCell.nextElementSibling
+                      if (nextCell) {
+                        const dateSpan = nextCell.querySelector("span.datetz")
+                        if (dateSpan) {
+                          additionalInfo.openingDate = dateSpan.textContent.trim()
+                        }
+                      }
+                    } else {
+                      // Méthode alternative pour trouver la date d'ouverture
+                      const allLabels = Array.from(infoTable.querySelectorAll("td.label"))
+                      const openingLabel = allLabels.find((label) => label.textContent.includes("Opening date:"))
+                      if (openingLabel) {
+                        const nextCell = openingLabel.nextElementSibling
+                        if (nextCell) {
+                          const dateSpan = nextCell.querySelector("span.datetz")
+                          if (dateSpan) {
+                            additionalInfo.openingDate = dateSpan.textContent.trim()
+                          } else {
+                            additionalInfo.openingDate = nextCell.textContent.trim()
+                          }
+                        }
+                      }
+                    }
+
+                    // Extraire Committee closing date
+                    const closingDateCell = infoTable.querySelector(
+                      'td.label[nowrap=""][nowrap]:contains("Committee closing date:")',
+                    )
+                    if (closingDateCell) {
+                      const nextCell = closingDateCell.nextElementSibling
+                      if (nextCell) {
+                        const dateSpan = nextCell.querySelector("span.datetz")
+                        if (dateSpan) {
+                          additionalInfo.committeeClosingDate = dateSpan.textContent.trim()
+                        }
+                      }
+                    } else {
+                      // Méthode alternative pour trouver la date de clôture
+                      const allLabels = Array.from(infoTable.querySelectorAll("td.label"))
+                      const closingLabel = allLabels.find((label) =>
+                        label.textContent.includes("Committee closing date:"),
+                      )
+                      if (closingLabel) {
+                        const nextCell = closingLabel.nextElementSibling
+                        if (nextCell) {
+                          const dateSpan = nextCell.querySelector("span.datetz")
+                          if (dateSpan) {
+                            additionalInfo.committeeClosingDate = dateSpan.textContent.trim()
+                          } else {
+                            additionalInfo.committeeClosingDate = nextCell.textContent.trim()
+                          }
+                        }
+                      }
+                    }
+                  }
+
+                  // Extraire les informations du tableau #cmBalSourceInfoArea
+                  const sourceTable = document.getElementById("cmBalSourceInfoArea")
+                  if (sourceTable) {
+                    // Extraire Committee
+                    const committeeCell = sourceTable.querySelector('td.label[nowrap=""]:contains("Committee:")')
+                    if (committeeCell) {
+                      const nextCell = committeeCell.nextElementSibling
+                      if (nextCell) {
+                        additionalInfo.committee = nextCell.textContent.trim()
+                      }
+                    } else {
+                      // Méthode alternative pour trouver le comité
+                      const allLabels = Array.from(sourceTable.querySelectorAll("td.label"))
+                      const committeeLabel = allLabels.find((label) => label.textContent.includes("Committee:"))
+                      if (committeeLabel) {
+                        const nextCell = committeeLabel.nextElementSibling
+                        if (nextCell) {
+                          additionalInfo.committee = nextCell.textContent.trim()
+                        }
+                      }
+                    }
+
+                    // Extraire CEN closing date ou ISO closing date
+                    const cenClosingCell = sourceTable.querySelector(
+                      'td.label[nowrap=""]:contains("CEN closing date:")',
+                    )
+                    const isoClosingCell = sourceTable.querySelector(
+                      'td.label[nowrap=""]:contains("ISO closing date:")',
+                    )
+
+                    if (cenClosingCell) {
+                      const nextCell = cenClosingCell.nextElementSibling
+                      if (nextCell) {
+                        additionalInfo.cenIsoClosingDate = nextCell.textContent.trim()
+                      }
+                    } else if (isoClosingCell) {
+                      const nextCell = isoClosingCell.nextElementSibling
+                      if (nextCell) {
+                        additionalInfo.cenIsoClosingDate = nextCell.textContent.trim()
+                      }
+                    } else {
+                      // Méthode alternative pour trouver la date de clôture CEN/ISO
+                      const allLabels = Array.from(sourceTable.querySelectorAll("td.label"))
+                      const cenLabel = allLabels.find((label) => label.textContent.includes("CEN closing date:"))
+                      const isoLabel = allLabels.find((label) => label.textContent.includes("ISO closing date:"))
+
+                      if (cenLabel) {
+                        const nextCell = cenLabel.nextElementSibling
+                        if (nextCell) {
+                          additionalInfo.cenIsoClosingDate = nextCell.textContent.trim()
+                        }
+                      } else if (isoLabel) {
+                        const nextCell = isoLabel.nextElementSibling
+                        if (nextCell) {
+                          additionalInfo.cenIsoClosingDate = nextCell.textContent.trim()
+                        }
+                      }
+                    }
+
+                    // Extraire Title
+                    const titleCell = sourceTable.querySelector('td.arealabel[nowrap=""]:contains("Title:")')
+                    if (titleCell) {
+                      const nextCell = titleCell.nextElementSibling
+                      if (nextCell) {
+                        additionalInfo.title = nextCell.textContent.trim()
+                      }
+                    } else {
+                      // Méthode alternative pour trouver le titre
+                      const allLabels = Array.from(sourceTable.querySelectorAll("td.arealabel"))
+                      const titleLabel = allLabels.find((label) => label.textContent.includes("Title:"))
+                      if (titleLabel) {
+                        const nextCell = titleLabel.nextElementSibling
+                        if (nextCell) {
+                          additionalInfo.title = nextCell.textContent.trim()
+                        }
+                      }
+                    }
+                  }
+
+                  if (!detailsTable) return { votes: [], additionalInfo }
 
                   // Récupérer les en-têtes
                   const headers = Array.from(detailsTable.querySelectorAll("th")).map((th) =>
@@ -594,7 +764,7 @@ app.post("/api/extract-votes", async (req, res) => {
                   const rows = Array.from(detailsTable.querySelectorAll("tbody tr, tr:not(:first-child)"))
 
                   // Extraire les données de chaque ligne
-                  return rows
+                  const votes = rows
                     .map((row) => {
                       const cells = Array.from(row.querySelectorAll("td"))
                       if (cells.length < 3) return null // Ignorer les lignes avec trop peu de cellules
@@ -639,7 +809,18 @@ app.post("/api/extract-votes", async (req, res) => {
                       return rowData
                     })
                     .filter(Boolean) // Filtrer les lignes nulles
+
+                  return { votes, additionalInfo }
                 })
+
+                // Ajuster la structure des données retournées pour inclure les informations supplémentaires
+                if (vote.voteDetails && vote.voteDetails.votes) {
+                  vote.additionalInfo = vote.voteDetails.additionalInfo
+                  vote.voteDetails = vote.voteDetails.votes
+                } else if (vote.voteDetails && !vote.voteDetails.votes) {
+                  vote.additionalInfo = vote.voteDetails.additionalInfo || {}
+                  vote.voteDetails = []
+                }
 
                 console.log(`${vote.voteDetails.length} détails extraits pour le vote ${vote.ref}`)
               } catch (error) {
