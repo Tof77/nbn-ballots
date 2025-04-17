@@ -149,10 +149,29 @@ export default function ChunkedExtractionForm({ onResultsReceived }: ChunkedExtr
           // Mettre à jour la progression
           setProgress(((i + 1) / totalChunks) * 100)
         } catch (error: unknown) {
-          setDebugInfo(
-            (prev) =>
-              `${prev || ""}\n\nErreur lors de l'extraction du lot ${i + 1}: ${error instanceof Error ? error.message : String(error)}`,
-          )
+          if (
+            error &&
+            typeof error === "object" &&
+            "name" in error &&
+            (error.name === "AbortError" || error.name === "TimeoutError")
+          ) {
+            setDebugInfo((prev) => `${prev || ""}\n\nL'opération a expiré (timeout). L'extraction prend trop de temps.`)
+            setError(
+              "L'opération a expiré. L'extraction des votes prend trop de temps. Essayez de réduire la plage de dates ou de désactiver l'extraction des détails des votes.",
+            )
+
+            // Activer automatiquement le mode démo en cas de timeout
+            setDemoMode(true)
+            onResultsReceived([], true)
+          } else {
+            // Autres erreurs
+            setDebugInfo(
+              (prev) =>
+                `${prev || ""}\n\nErreur lors de l'extraction: ${error instanceof Error ? error.message : String(error)}`,
+            )
+            setError(error instanceof Error ? error.message : String(error) || "Une erreur est survenue")
+            onResultsReceived([])
+          }
           success = false
           break
         }
