@@ -3,10 +3,27 @@ const cors = require("cors")
 const puppeteer = require("puppeteer")
 const app = express()
 const port = process.env.PORT || 3000
+const path = require("path")
+const fs = require("fs")
 
 // Activer CORS pour permettre les requêtes depuis votre application Vercel
 app.use(cors())
 app.use(express.json())
+
+// Créer un dossier public pour servir les captures d'écran
+const publicDir = path.join(__dirname, "public")
+const screenshotsDir = path.join(publicDir, "screenshots")
+
+// Créer les dossiers s'ils n'existent pas
+if (!fs.existsSync(publicDir)) {
+  fs.mkdirSync(publicDir)
+}
+if (!fs.existsSync(screenshotsDir)) {
+  fs.mkdirSync(screenshotsDir)
+}
+
+// Servir les fichiers statiques du dossier public
+app.use("/public", express.static(publicDir))
 
 // Route de test pour vérifier que l'API fonctionne
 app.get("/", (req, res) => {
@@ -16,6 +33,26 @@ app.get("/", (req, res) => {
 // Route pour maintenir le service actif (ping)
 app.get("/ping", (req, res) => {
   res.json({ status: "pong", timestamp: new Date().toISOString() })
+})
+
+// Route pour accéder aux captures d'écran
+app.get("/screenshots", (req, res) => {
+  try {
+    const files = fs.readdirSync(screenshotsDir)
+    const screenshots = files
+      .map((file) => {
+        return {
+          name: file,
+          url: `${req.protocol}://${req.get("host")}/public/screenshots/${file}`,
+          timestamp: fs.statSync(path.join(screenshotsDir, file)).mtime,
+        }
+      })
+      .sort((a, b) => b.timestamp - a.timestamp) // Trier par date de modification (plus récent en premier)
+
+    res.json({ screenshots })
+  } catch (error) {
+    res.status(500).json({ error: "Erreur lors de la récupération des captures d'écran", details: error.message })
+  }
 })
 
 // Fonction pour déchiffrer les données simulées
@@ -45,21 +82,54 @@ function extractCommissionCode(commissionId) {
   return "Unknown"
 }
 
+// Fonction pour générer un nom de fichier unique pour les captures d'écran
+function generateScreenshotFilename(prefix) {
+  const timestamp = new Date().toISOString().replace(/:/g, "-").replace(/\./g, "-")
+  return `${prefix}-${timestamp}.png`
+}
+
 // Fonction pour capturer le HTML de la page pour le débogage
-async function capturePageHtml(page, path) {
+async function capturePageHtml(page, htmlPath) {
   try {
     const html = await page.content().catch((e) => {
       console.log(`Erreur lors de la capture du HTML: ${e.message}`)
       return "Erreur lors de la capture du HTML"
     })
 
-    const fs = require("fs")
-    fs.writeFileSync(path, html)
-    console.log(`HTML capturé et enregistré dans ${path}`)
-    return html
+    // Enregistrer le HTML
+    fs.writeFileSync(htmlPath, html)
+    console.log(`HTML capturé et enregistré dans ${htmlPath}`)
+
+    // Générer un nom de fichier pour la capture d'écran
+    const filename = generateScreenshotFilename(path.basename(htmlPath, ".html"))
+    const screenshotPath = path.join(screenshotsDir, filename)
+
+    // Prendre une capture d'écran
+    await page.screenshot({ path: screenshotPath, fullPage: true })
+    console.log(`Capture d'écran enregistrée dans ${screenshotPath}`)
+
+    // Générer l'URL de la capture d'écran
+    const baseUrl = process.env.RENDER_BASE_URL || `http://localhost:${port}`
+    const screenshotUrl = `${baseUrl}/public/screenshots/${filename}`
+
+    // Stocker l'URL dans un objet global pour l'inclure dans la réponse
+    if (!global.screenshotUrls) {
+      global.screenshotUrls = {}
+    }
+    global.screenshotUrls[path.basename(htmlPath)] = screenshotUrl
+
+    console.log(`URL de la capture d'écran: ${screenshotUrl}`)
+
+    return {
+      html,
+      screenshotUrl,
+    }
   } catch (error) {
-    console.error(`Erreur lors de la capture du HTML pour ${path}:`, error)
-    return "Erreur lors de la capture du HTML"
+    console.error(`Erreur lors de la capture du HTML pour ${htmlPath}:`, error)
+    return {
+      html: "Erreur lors de la capture du HTML",
+      error: error.message,
+    }
   }
 }
 
@@ -104,6 +174,10 @@ async function enhancedQuerySelector(page, selector, textContent) {
 app.post("/api/extract-votes", async (req, res) => {
   console.log("Requête d'extraction reçue")
   let browser = null
+  // Initialiser un tableau pour stocker les URLs des captures d'écran
+  const screenshotUrls = []
+  // Créer un ID de session unique pour regrouper les captures d'écran
+  const sessionId = Date.now().toString()
 
   try {
     const { commissionId, startDate, extractDetails = true, credentials } = req.body
@@ -192,7 +266,14 @@ app.post("/api/extract-votes", async (req, res) => {
       await delay(5000)
 
       // Prendre une capture d'écran pour le débogage
-      await page.screenshot({ path: "/tmp/initial-page.png" })
+      const initialScreenshotPath = path.join(screenshotsDir, `${sessionId}-initial-page.png`)
+      await page.screenshot({ path: initialScreenshotPath, fullPage: true })
+
+      // Générer l'URL de la capture d'écran
+      const baseUrl = process.env.RENDER_BASE_URL || `http://localhost:${port}`
+      const initialScreenshotUrl = `${baseUrl}/public/screenshots/${path.basename(initialScreenshotPath)}`
+      screenshotUrls.push({ name: "Page initiale", url: initialScreenshotUrl })
+      console.log(`Capture d'écran initiale: ${initialScreenshotUrl}`)
 
       // Capturer l'URL actuelle pour voir si nous sommes redirigés vers la page de connexion
       const currentUrl = page.url()
@@ -206,12 +287,17 @@ app.post("/api/extract-votes", async (req, res) => {
         console.log("Page de connexion détectée, tentative de connexion...")
 
         // Prendre une capture d'écran de la page de connexion
-        await page.screenshot({ path: "/tmp/login-page.png" })
+        const loginScreenshotPath = path.join(screenshotsDir, `${sessionId}-login-page.png`)
+        await page.screenshot({ path: loginScreenshotPath, fullPage: true })
+        const loginScreenshotUrl = `${baseUrl}/public/screenshots/${path.basename(loginScreenshotPath)}`
+        screenshotUrls.push({ name: "Page de connexion", url: loginScreenshotUrl })
+        console.log(`Capture d'écran de la page de connexion: ${loginScreenshotUrl}`)
 
-        try {
-          await capturePageHtml(page, "/tmp/login-page.html")
-        } catch (e) {
-          console.log(`Erreur lors de la capture du HTML de la page de connexion: ${e.message}`)
+        // Capturer le HTML de la page de connexion
+        const loginHtmlPath = path.join("/tmp", `${sessionId}-login-page.html`)
+        const loginHtmlResult = await capturePageHtml(page, loginHtmlPath)
+        if (loginHtmlResult.screenshotUrl) {
+          screenshotUrls.push({ name: "HTML de la page de connexion", url: loginHtmlResult.screenshotUrl })
         }
 
         // Attendre que les champs de connexion soient chargés
@@ -250,7 +336,10 @@ app.post("/api/extract-votes", async (req, res) => {
 
         if (!usernameSelector || !passwordSelector) {
           console.error("Impossible de trouver les champs de connexion")
-          await page.screenshot({ path: "/tmp/login-fields-not-found.png" })
+          const loginFieldsNotFoundPath = path.join(screenshotsDir, `${sessionId}-login-fields-not-found.png`)
+          await page.screenshot({ path: loginFieldsNotFoundPath, fullPage: true })
+          const loginFieldsNotFoundUrl = `${baseUrl}/public/screenshots/${path.basename(loginFieldsNotFoundPath)}`
+          screenshotUrls.push({ name: "Champs de connexion non trouvés", url: loginFieldsNotFoundUrl })
           throw new Error("Impossible de trouver les champs de connexion sur la page")
         }
 
@@ -277,14 +366,20 @@ app.post("/api/extract-votes", async (req, res) => {
 
         if (!loginButtonSelector) {
           console.error("Impossible de trouver le bouton de connexion")
-          await page.screenshot({ path: "/tmp/login-button-not-found.png" })
+          const loginButtonNotFoundPath = path.join(screenshotsDir, `${sessionId}-login-button-not-found.png`)
+          await page.screenshot({ path: loginButtonNotFoundPath, fullPage: true })
+          const loginButtonNotFoundUrl = `${baseUrl}/public/screenshots/${path.basename(loginButtonNotFoundPath)}`
+          screenshotUrls.push({ name: "Bouton de connexion non trouvé", url: loginButtonNotFoundUrl })
           throw new Error("Impossible de trouver le bouton de connexion sur la page")
         }
 
         console.log(`Bouton de connexion trouvé: ${loginButtonSelector}`)
 
         // Prendre une capture d'écran avant de cliquer sur le bouton de connexion
-        await page.screenshot({ path: "/tmp/before-login-click.png" })
+        const beforeLoginClickPath = path.join(screenshotsDir, `${sessionId}-before-login-click.png`)
+        await page.screenshot({ path: beforeLoginClickPath, fullPage: true })
+        const beforeLoginClickUrl = `${baseUrl}/public/screenshots/${path.basename(beforeLoginClickPath)}`
+        screenshotUrls.push({ name: "Avant clic sur connexion", url: beforeLoginClickUrl })
 
         // Cliquer sur le bouton de connexion et attendre la navigation
         await Promise.all([page.click(loginButtonSelector), waitForNavigationSafely(page, { timeout: 60000 })])
@@ -296,14 +391,17 @@ app.post("/api/extract-votes", async (req, res) => {
       }
 
       // Prendre une capture d'écran après la connexion
-      await page.screenshot({ path: "/tmp/after-login.png" })
+      const afterLoginPath = path.join(screenshotsDir, `${sessionId}-after-login.png`)
+      await page.screenshot({ path: afterLoginPath, fullPage: true })
+      const afterLoginUrl = `${baseUrl}/public/screenshots/${path.basename(afterLoginPath)}`
+      screenshotUrls.push({ name: "Après connexion", url: afterLoginUrl })
 
       // Capturer l'URL actuelle
-      const afterLoginUrl = page.url()
-      console.log(`URL après connexion: ${afterLoginUrl}`)
+      const afterLoginPageUrl = page.url()
+      console.log(`URL après connexion: ${afterLoginPageUrl}`)
 
       // Vérifier si nous sommes sur la page d'accueil
-      const isOnHomePage = afterLoginUrl.includes("/home/") || afterLoginUrl.includes("isolutions.iso.org")
+      const isOnHomePage = afterLoginPageUrl.includes("/home/") || afterLoginPageUrl.includes("isolutions.iso.org")
       console.log(`Sur la page d'accueil: ${isOnHomePage}`)
 
       if (!isOnHomePage) {
@@ -328,7 +426,10 @@ app.post("/api/extract-votes", async (req, res) => {
         await delay(10000)
 
         // Prendre une capture d'écran de la page de ballots
-        await page.screenshot({ path: "/tmp/ballots-page.png" })
+        const ballotsPagePath = path.join(screenshotsDir, `${sessionId}-ballots-page.png`)
+        await page.screenshot({ path: ballotsPagePath, fullPage: true })
+        const ballotsPageUrl = `${baseUrl}/public/screenshots/${path.basename(ballotsPagePath)}`
+        screenshotUrls.push({ name: "Page des ballots", url: ballotsPageUrl })
 
         // Naviguer vers la page de recherche
         await page.goto(
@@ -343,17 +444,24 @@ app.post("/api/extract-votes", async (req, res) => {
         await delay(8000) // Augmenter le délai à 15 secondes
       } catch (error) {
         console.error("Erreur lors de la navigation vers la page de recherche:", error)
-        await page.screenshot({ path: "/tmp/navigation-error.png" })
+        const navigationErrorPath = path.join(screenshotsDir, `${sessionId}-navigation-error.png`)
+        await page.screenshot({ path: navigationErrorPath, fullPage: true })
+        const navigationErrorUrl = `${baseUrl}/public/screenshots/${path.basename(navigationErrorPath)}`
+        screenshotUrls.push({ name: "Erreur de navigation", url: navigationErrorUrl })
         throw new Error(`Erreur lors de la navigation vers la page de recherche: ${error.message}`)
       }
 
       // Prendre une capture d'écran de la page de recherche
-      await page.screenshot({ path: "/tmp/search-page.png" })
+      const searchPagePath = path.join(screenshotsDir, `${sessionId}-search-page.png`)
+      await page.screenshot({ path: searchPagePath, fullPage: true })
+      const searchPageUrl = `${baseUrl}/public/screenshots/${path.basename(searchPagePath)}`
+      screenshotUrls.push({ name: "Page de recherche", url: searchPageUrl })
 
-      try {
-        await capturePageHtml(page, "/tmp/search-page.html")
-      } catch (e) {
-        console.log(`Erreur lors de la capture du HTML de la page de recherche: ${e.message}`)
+      // Capturer le HTML de la page de recherche
+      const searchHtmlPath = path.join("/tmp", `${sessionId}-search-page.html`)
+      const searchHtmlResult = await capturePageHtml(page, searchHtmlPath)
+      if (searchHtmlResult.screenshotUrl) {
+        screenshotUrls.push({ name: "HTML de la page de recherche", url: searchHtmlResult.screenshotUrl })
       }
 
       // Vérifier si nous sommes sur la page de recherche
@@ -364,7 +472,10 @@ app.post("/api/extract-votes", async (req, res) => {
       console.log(`Titre de la page: ${pageTitle}`)
 
       // Capturer l'état de la page avant la sélection de la commission
-      await page.screenshot({ path: "/tmp/before-committee-selection.png" })
+      const beforeCommitteeSelectionPath = path.join(screenshotsDir, `${sessionId}-before-committee-selection.png`)
+      await page.screenshot({ path: beforeCommitteeSelectionPath, fullPage: true })
+      const beforeCommitteeSelectionUrl = `${baseUrl}/public/screenshots/${path.basename(beforeCommitteeSelectionPath)}`
+      screenshotUrls.push({ name: "Avant sélection de commission", url: beforeCommitteeSelectionUrl })
 
       // Vérifier si le sélecteur de commission existe
       const committeeSelectExists = await page
@@ -386,7 +497,10 @@ app.post("/api/extract-votes", async (req, res) => {
         })
 
         // Prendre une capture d'écran après la sélection de la commission
-        await page.screenshot({ path: "/tmp/after-committee-selection.png" })
+        const afterCommitteeSelectionPath = path.join(screenshotsDir, `${sessionId}-after-committee-selection.png`)
+        await page.screenshot({ path: afterCommitteeSelectionPath, fullPage: true })
+        const afterCommitteeSelectionUrl = `${baseUrl}/public/screenshots/${path.basename(afterCommitteeSelectionPath)}`
+        screenshotUrls.push({ name: "Après sélection de commission", url: afterCommitteeSelectionUrl })
 
         // Définir la date si demandé
         if (startDate) {
@@ -401,7 +515,10 @@ app.post("/api/extract-votes", async (req, res) => {
             })
 
           // Prendre une capture d'écran après la définition de la date
-          await page.screenshot({ path: "/tmp/after-date-setting.png" })
+          const afterDateSettingPath = path.join(screenshotsDir, `${sessionId}-after-date-setting.png`)
+          await page.screenshot({ path: afterDateSettingPath, fullPage: true })
+          const afterDateSettingUrl = `${baseUrl}/public/screenshots/${path.basename(afterDateSettingPath)}`
+          screenshotUrls.push({ name: "Après définition de la date", url: afterDateSettingUrl })
         }
 
         // Cliquer sur le bouton de recherche
@@ -414,12 +531,16 @@ app.post("/api/extract-votes", async (req, res) => {
         await delay(15000) // Attendre 15 secondes pour que les résultats se chargent
 
         // Prendre une capture d'écran des résultats
-        await page.screenshot({ path: "/tmp/search-results.png" })
+        const searchResultsPath = path.join(screenshotsDir, `${sessionId}-search-results.png`)
+        await page.screenshot({ path: searchResultsPath, fullPage: true })
+        const searchResultsUrl = `${baseUrl}/public/screenshots/${path.basename(searchResultsPath)}`
+        screenshotUrls.push({ name: "Résultats de recherche", url: searchResultsUrl })
 
-        try {
-          await capturePageHtml(page, "/tmp/search-results.html")
-        } catch (e) {
-          console.log(`Erreur lors de la capture du HTML des résultats: ${e.message}`)
+        // Capturer le HTML des résultats
+        const resultsHtmlPath = path.join("/tmp", `${sessionId}-search-results.html`)
+        const resultsHtmlResult = await capturePageHtml(page, resultsHtmlPath)
+        if (resultsHtmlResult.screenshotUrl) {
+          screenshotUrls.push({ name: "HTML des résultats", url: resultsHtmlResult.screenshotUrl })
         }
 
         // Extraire les résultats du tableau
@@ -581,12 +702,19 @@ app.post("/api/extract-votes", async (req, res) => {
                 await delay(5000)
 
                 // Prendre une capture d'écran de la page de détails
-                await page.screenshot({ path: `/tmp/vote-details-${i}.png` })
+                const voteDetailsPath = path.join(screenshotsDir, `${sessionId}-vote-details-${i}.png`)
+                await page.screenshot({ path: voteDetailsPath, fullPage: true })
+                const voteDetailsUrl = `${baseUrl}/public/screenshots/${path.basename(voteDetailsPath)}`
+                screenshotUrls.push({ name: `Détails du vote ${vote.ref}`, url: voteDetailsUrl })
 
-                try {
-                  await capturePageHtml(page, `/tmp/vote-details-${i}.html`)
-                } catch (e) {
-                  console.log(`Erreur lors de la capture du HTML des détails: ${e.message}`)
+                // Capturer le HTML des détails
+                const voteDetailsHtmlPath = path.join("/tmp", `${sessionId}-vote-details-${i}.html`)
+                const voteDetailsHtmlResult = await capturePageHtml(page, voteDetailsHtmlPath)
+                if (voteDetailsHtmlResult.screenshotUrl) {
+                  screenshotUrls.push({
+                    name: `HTML des détails du vote ${vote.ref}`,
+                    url: voteDetailsHtmlResult.screenshotUrl,
+                  })
                 }
 
                 // Extraire les détails du vote
@@ -775,7 +903,7 @@ app.post("/api/extract-votes", async (req, res) => {
         await browser.close()
         browser = null
 
-        // Retourner les résultats
+        // Retourner les résultats avec les URLs des captures d'écran
         return res.json({
           votes,
           debug: {
@@ -784,11 +912,19 @@ app.post("/api/extract-votes", async (req, res) => {
             username: username,
             startDate: startDate,
             numVotesGenerated: votes.length,
+            sessionId: sessionId,
+            screenshotUrls: screenshotUrls,
           },
         })
       } else {
         // Si le sélecteur de commission n'est pas trouvé, essayer d'analyser la structure de la page
         console.log("Sélecteur de commission non trouvé, analyse de la structure de la page")
+
+        // Prendre une capture d'écran pour le débogage
+        const noCommitteeSelectorPath = path.join(screenshotsDir, `${sessionId}-no-committee-selector.png`)
+        await page.screenshot({ path: noCommitteeSelectorPath, fullPage: true })
+        const noCommitteeSelectorUrl = `${baseUrl}/public/screenshots/${path.basename(noCommitteeSelectorPath)}`
+        screenshotUrls.push({ name: "Sélecteur de commission non trouvé", url: noCommitteeSelectorUrl })
 
         // Analyser la structure de la page pour trouver les formulaires et les champs
         const formInfo = await page
@@ -929,7 +1065,16 @@ app.post("/api/extract-votes", async (req, res) => {
             }
 
             // Prendre une capture d'écran après la sélection de la commission
-            await page.screenshot({ path: "/tmp/after-alternative-committee-selection.png" })
+            const afterAlternativeCommitteeSelectionPath = path.join(
+              screenshotsDir,
+              `${sessionId}-after-alternative-committee-selection.png`,
+            )
+            await page.screenshot({ path: afterAlternativeCommitteeSelectionPath, fullPage: true })
+            const afterAlternativeCommitteeSelectionUrl = `${baseUrl}/public/screenshots/${path.basename(afterAlternativeCommitteeSelectionPath)}`
+            screenshotUrls.push({
+              name: "Après sélection alternative de commission",
+              url: afterAlternativeCommitteeSelectionUrl,
+            })
           } else {
             console.log(`Le sélecteur ${committeeSelector} n'existe pas sur la page`)
           }
@@ -1003,7 +1148,16 @@ app.post("/api/extract-votes", async (req, res) => {
               )
 
               // Prendre une capture d'écran après la définition de la date
-              await page.screenshot({ path: "/tmp/after-alternative-date-setting.png" })
+              const afterAlternativeDateSettingPath = path.join(
+                screenshotsDir,
+                `${sessionId}-after-alternative-date-setting.png`,
+              )
+              await page.screenshot({ path: afterAlternativeDateSettingPath, fullPage: true })
+              const afterAlternativeDateSettingUrl = `${baseUrl}/public/screenshots/${path.basename(afterAlternativeDateSettingPath)}`
+              screenshotUrls.push({
+                name: "Après définition alternative de la date",
+                url: afterAlternativeDateSettingUrl,
+              })
             } else {
               console.log(`Le sélecteur ${dateSelector} n'existe pas sur la page`)
             }
@@ -1082,12 +1236,19 @@ app.post("/api/extract-votes", async (req, res) => {
         }
 
         // Prendre une capture d'écran des résultats
-        await page.screenshot({ path: "/tmp/alternative-search-results.png" })
+        const alternativeSearchResultsPath = path.join(screenshotsDir, `${sessionId}-alternative-search-results.png`)
+        await page.screenshot({ path: alternativeSearchResultsPath, fullPage: true })
+        const alternativeSearchResultsUrl = `${baseUrl}/public/screenshots/${path.basename(alternativeSearchResultsPath)}`
+        screenshotUrls.push({ name: "Résultats de recherche alternatifs", url: alternativeSearchResultsUrl })
 
-        try {
-          await capturePageHtml(page, "/tmp/alternative-search-results.html")
-        } catch (e) {
-          console.log(`Erreur lors de la capture du HTML des résultats alternatifs: ${e.message}`)
+        // Capturer le HTML des résultats alternatifs
+        const alternativeResultsHtmlPath = path.join("/tmp", `${sessionId}-alternative-search-results.html`)
+        const alternativeResultsHtmlResult = await capturePageHtml(page, alternativeResultsHtmlPath)
+        if (alternativeResultsHtmlResult.screenshotUrl) {
+          screenshotUrls.push({
+            name: "HTML des résultats alternatifs",
+            url: alternativeResultsHtmlResult.screenshotUrl,
+          })
         }
 
         // Extraction alternative des données
@@ -1199,12 +1360,17 @@ app.post("/api/extract-votes", async (req, res) => {
                     rowData.openingDate = text
                   } else if (header.includes("closing")) {
                     rowData.closingDate = text
-                  } else if (header.includes("role")) {
+                  } else {
+                    rowData.closingDate = text
+                  }
+                  else
+                  if (header.includes("role")) {
                     rowData.role = text
                   } else if (header.includes("source") && header.includes("type")) {
                     rowData.sourceType = text
                   } else if (header.includes("source") && !header.includes("type")) {
                     rowData.source = text
+                    \
                   } else if (i === 0) {
                     // Première colonne, probablement un identifiant ou une référence
                     rowData.ref = text
@@ -1234,7 +1400,7 @@ app.post("/api/extract-votes", async (req, res) => {
         await browser.close()
         browser = null
 
-        // Retourner les résultats
+        // Retourner les résultats avec les URLs des captures d'écran
         return res.json({
           votes,
           debug: {
@@ -1244,6 +1410,8 @@ app.post("/api/extract-votes", async (req, res) => {
             startDate: startDate,
             numVotesGenerated: votes.length,
             alternativeMethod: true,
+            sessionId: sessionId,
+            screenshotUrls: screenshotUrls,
           },
         })
       }
@@ -1259,6 +1427,7 @@ app.post("/api/extract-votes", async (req, res) => {
       return res.status(500).json({
         error: "Erreur lors de l'extraction des votes",
         details: error.message,
+        screenshotUrls: screenshotUrls,
       })
     }
   } catch (error) {
@@ -1273,6 +1442,7 @@ app.post("/api/extract-votes", async (req, res) => {
     return res.status(500).json({
       error: "Erreur lors de l'extraction des votes",
       details: error.message,
+      screenshotUrls: screenshotUrls,
     })
   }
 })
