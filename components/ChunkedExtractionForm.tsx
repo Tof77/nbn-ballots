@@ -111,10 +111,10 @@ export default function ChunkedExtractionForm({ onResultsReceived }: ChunkedExtr
         )
 
         return data
-      } catch (error) {
+      } catch (error: unknown) {
         setDebugInfo(
           (prev) =>
-            `${prev || ""}\n\nErreur lors de l'extraction du lot ${chunkIndex + 1}/${totalChunks}: ${error.message}`,
+            `${prev || ""}\n\nErreur lors de l'extraction du lot ${chunkIndex + 1}/${totalChunks}: ${error instanceof Error ? error.message : String(error)}`,
         )
         throw error
       }
@@ -148,8 +148,11 @@ export default function ChunkedExtractionForm({ onResultsReceived }: ChunkedExtr
 
           // Mettre à jour la progression
           setProgress(((i + 1) / totalChunks) * 100)
-        } catch (error) {
-          setDebugInfo((prev) => `${prev || ""}\n\nErreur lors de l'extraction du lot ${i + 1}: ${error.message}`)
+        } catch (error: unknown) {
+          setDebugInfo(
+            (prev) =>
+              `${prev || ""}\n\nErreur lors de l'extraction du lot ${i + 1}: ${error instanceof Error ? error.message : String(error)}`,
+          )
           success = false
           break
         }
@@ -167,8 +170,8 @@ export default function ChunkedExtractionForm({ onResultsReceived }: ChunkedExtr
         setDebugInfo((prev) => `${prev || ""}\n\nAucun vote trouvé`)
         onResultsReceived([])
       }
-    } catch (error) {
-      setError(error.message || "Une erreur est survenue")
+    } catch (error: unknown) {
+      setError(error instanceof Error ? error.message : String(error))
       onResultsReceived([])
     } finally {
       setLoading(false)
