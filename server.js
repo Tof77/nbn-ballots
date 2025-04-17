@@ -613,63 +613,28 @@ app.post("/api/extract-votes", async (req, res) => {
                   // Extraire les informations du tableau #cmBalInfoArea
                   const infoTable = document.getElementById("cmBalInfoArea")
                   if (infoTable) {
-                    // Extraire Opening date
-                    const openingDateCell = infoTable.querySelector(
-                      'td.label[nowrap=""][nowrap]:contains("Opening date:")',
-                    )
-                    if (openingDateCell) {
-                      const nextCell = openingDateCell.nextElementSibling
-                      if (nextCell) {
-                        const dateSpan = nextCell.querySelector("span.datetz")
-                        if (dateSpan) {
-                          additionalInfo.openingDate = dateSpan.textContent.trim()
-                        }
-                      }
-                    } else {
-                      // Méthode alternative pour trouver la date d'ouverture
-                      const allLabels = Array.from(infoTable.querySelectorAll("td.label"))
-                      const openingLabel = allLabels.find((label) => label.textContent.includes("Opening date:"))
-                      if (openingLabel) {
-                        const nextCell = openingLabel.nextElementSibling
-                        if (nextCell) {
-                          const dateSpan = nextCell.querySelector("span.datetz")
-                          if (dateSpan) {
-                            additionalInfo.openingDate = dateSpan.textContent.trim()
-                          } else {
-                            additionalInfo.openingDate = nextCell.textContent.trim()
-                          }
-                        }
+                    // Méthode alternative pour trouver la date d'ouverture
+                    const allLabels = Array.from(infoTable.querySelectorAll("td.label"))
+                    const openingLabel = allLabels.find((label) => label.textContent.includes("Opening date:"))
+                    if (openingLabel && openingLabel.nextElementSibling) {
+                      const dateSpan = openingLabel.nextElementSibling.querySelector("span.datetz")
+                      if (dateSpan) {
+                        additionalInfo.openingDate = dateSpan.textContent.trim()
+                      } else {
+                        additionalInfo.openingDate = openingLabel.nextElementSibling.textContent.trim()
                       }
                     }
 
-                    // Extraire Committee closing date
-                    const closingDateCell = infoTable.querySelector(
-                      'td.label[nowrap=""][nowrap]:contains("Committee closing date:")',
+                    // Méthode alternative pour trouver la date de clôture
+                    const closingLabel = allLabels.find((label) =>
+                      label.textContent.includes("Committee closing date:"),
                     )
-                    if (closingDateCell) {
-                      const nextCell = closingDateCell.nextElementSibling
-                      if (nextCell) {
-                        const dateSpan = nextCell.querySelector("span.datetz")
-                        if (dateSpan) {
-                          additionalInfo.committeeClosingDate = dateSpan.textContent.trim()
-                        }
-                      }
-                    } else {
-                      // Méthode alternative pour trouver la date de clôture
-                      const allLabels = Array.from(infoTable.querySelectorAll("td.label"))
-                      const closingLabel = allLabels.find((label) =>
-                        label.textContent.includes("Committee closing date:"),
-                      )
-                      if (closingLabel) {
-                        const nextCell = closingLabel.nextElementSibling
-                        if (nextCell) {
-                          const dateSpan = nextCell.querySelector("span.datetz")
-                          if (dateSpan) {
-                            additionalInfo.committeeClosingDate = dateSpan.textContent.trim()
-                          } else {
-                            additionalInfo.committeeClosingDate = nextCell.textContent.trim()
-                          }
-                        }
+                    if (closingLabel && closingLabel.nextElementSibling) {
+                      const dateSpan = closingLabel.nextElementSibling.querySelector("span.datetz")
+                      if (dateSpan) {
+                        additionalInfo.committeeClosingDate = dateSpan.textContent.trim()
+                      } else {
+                        additionalInfo.committeeClosingDate = closingLabel.nextElementSibling.textContent.trim()
                       }
                     }
                   }
@@ -677,79 +642,28 @@ app.post("/api/extract-votes", async (req, res) => {
                   // Extraire les informations du tableau #cmBalSourceInfoArea
                   const sourceTable = document.getElementById("cmBalSourceInfoArea")
                   if (sourceTable) {
-                    // Extraire Committee
-                    const committeeCell = sourceTable.querySelector('td.label[nowrap=""]:contains("Committee:")')
-                    if (committeeCell) {
-                      const nextCell = committeeCell.nextElementSibling
-                      if (nextCell) {
-                        additionalInfo.committee = nextCell.textContent.trim()
-                      }
-                    } else {
-                      // Méthode alternative pour trouver le comité
-                      const allLabels = Array.from(sourceTable.querySelectorAll("td.label"))
-                      const committeeLabel = allLabels.find((label) => label.textContent.includes("Committee:"))
-                      if (committeeLabel) {
-                        const nextCell = committeeLabel.nextElementSibling
-                        if (nextCell) {
-                          additionalInfo.committee = nextCell.textContent.trim()
-                        }
-                      }
+                    // Méthode alternative pour trouver le comité
+                    const allLabels = Array.from(sourceTable.querySelectorAll("td.label"))
+                    const committeeLabel = allLabels.find((label) => label.textContent.includes("Committee:"))
+                    if (committeeLabel && committeeLabel.nextElementSibling) {
+                      additionalInfo.committee = committeeLabel.nextElementSibling.textContent.trim()
                     }
 
-                    // Extraire CEN closing date ou ISO closing date
-                    const cenClosingCell = sourceTable.querySelector(
-                      'td.label[nowrap=""]:contains("CEN closing date:")',
-                    )
-                    const isoClosingCell = sourceTable.querySelector(
-                      'td.label[nowrap=""]:contains("ISO closing date:")',
-                    )
+                    // Méthode alternative pour trouver la date de clôture CEN/ISO
+                    const cenLabel = allLabels.find((label) => label.textContent.includes("CEN closing date:"))
+                    const isoLabel = allLabels.find((label) => label.textContent.includes("ISO closing date:"))
 
-                    if (cenClosingCell) {
-                      const nextCell = cenClosingCell.nextElementSibling
-                      if (nextCell) {
-                        additionalInfo.cenIsoClosingDate = nextCell.textContent.trim()
-                      }
-                    } else if (isoClosingCell) {
-                      const nextCell = isoClosingCell.nextElementSibling
-                      if (nextCell) {
-                        additionalInfo.cenIsoClosingDate = nextCell.textContent.trim()
-                      }
-                    } else {
-                      // Méthode alternative pour trouver la date de clôture CEN/ISO
-                      const allLabels = Array.from(sourceTable.querySelectorAll("td.label"))
-                      const cenLabel = allLabels.find((label) => label.textContent.includes("CEN closing date:"))
-                      const isoLabel = allLabels.find((label) => label.textContent.includes("ISO closing date:"))
-
-                      if (cenLabel) {
-                        const nextCell = cenLabel.nextElementSibling
-                        if (nextCell) {
-                          additionalInfo.cenIsoClosingDate = nextCell.textContent.trim()
-                        }
-                      } else if (isoLabel) {
-                        const nextCell = isoLabel.nextElementSibling
-                        if (nextCell) {
-                          additionalInfo.cenIsoClosingDate = nextCell.textContent.trim()
-                        }
-                      }
+                    if (cenLabel && cenLabel.nextElementSibling) {
+                      additionalInfo.cenIsoClosingDate = cenLabel.nextElementSibling.textContent.trim()
+                    } else if (isoLabel && isoLabel.nextElementSibling) {
+                      additionalInfo.cenIsoClosingDate = isoLabel.nextElementSibling.textContent.trim()
                     }
 
-                    // Extraire Title
-                    const titleCell = sourceTable.querySelector('td.arealabel[nowrap=""]:contains("Title:")')
-                    if (titleCell) {
-                      const nextCell = titleCell.nextElementSibling
-                      if (nextCell) {
-                        additionalInfo.title = nextCell.textContent.trim()
-                      }
-                    } else {
-                      // Méthode alternative pour trouver le titre
-                      const allLabels = Array.from(sourceTable.querySelectorAll("td.arealabel"))
-                      const titleLabel = allLabels.find((label) => label.textContent.includes("Title:"))
-                      if (titleLabel) {
-                        const nextCell = titleLabel.nextElementSibling
-                        if (nextCell) {
-                          additionalInfo.title = nextCell.textContent.trim()
-                        }
-                      }
+                    // Méthode alternative pour trouver le titre
+                    const titleLabels = Array.from(sourceTable.querySelectorAll("td.arealabel"))
+                    const titleLabel = titleLabels.find((label) => label.textContent.includes("Title:"))
+                    if (titleLabel && titleLabel.nextElementSibling) {
+                      additionalInfo.title = titleLabel.nextElementSibling.textContent.trim()
                     }
                   }
 
