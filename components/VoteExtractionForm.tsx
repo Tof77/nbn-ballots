@@ -176,7 +176,7 @@ function getHttpErrorInfo(statusCode: number): { title: string; description: str
 }
 
 interface VoteExtractionFormProps {
-  onResultsReceived: (results: any[], isDemoMode?: boolean) => void
+  onResultsReceived: (results: any[], isDemoMode?: boolean, screenshots?: string[]) => void
 }
 
 export default function VoteExtractionForm({ onResultsReceived }: VoteExtractionFormProps) {
@@ -451,7 +451,8 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
 
         // Dans le bloc try après avoir reçu la réponse
         const isDemoMode = !!json.debug?.demoMode
-        onResultsReceived(json.votes || [], isDemoMode)
+        const screenshots = json.debug?.screenshotUrls || []
+        onResultsReceived(json.votes || [], isDemoMode, screenshots)
 
         // Effacer le mot de passe après utilisation pour plus de sécurité
         setPassword("")
