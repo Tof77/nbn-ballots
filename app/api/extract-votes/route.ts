@@ -1,9 +1,11 @@
+// Améliorer la gestion des timeouts dans l'API d'extraction
+
 import { type NextRequest, NextResponse } from "next/server"
 
 // Définir le runtime Node.js pour cette route API
 export const runtime = "nodejs"
-// Définir la durée maximale d'exécution à 60 secondes
-export const maxDuration = 90
+// Augmenter la durée maximale d'exécution à 120 secondes
+export const maxDuration = 120
 
 // Définir les interfaces pour les types de données
 interface VoteDetail {
@@ -133,8 +135,8 @@ export async function POST(req: NextRequest) {
               Pragma: "no-cache",
               Expires: "0",
             },
-            // Ajouter un timeout pour éviter d'attendre trop longtemps
-            signal: AbortSignal.timeout(10000), // Augmenté à 10 secondes
+            // Ajouter un timeout plus long pour le ping initial
+            signal: AbortSignal.timeout(15000), // 15 secondes
           })
           const pingDuration = Date.now() - pingStartTime
           diagnostics.push(`Ping Render status: ${pingResponse.status} (${pingDuration}ms)`)
@@ -183,6 +185,10 @@ export async function POST(req: NextRequest) {
         diagnostics.push("Appel à l'API Render pour l'extraction des votes...")
         const extractStartTime = Date.now()
         try {
+          // Ajouter un timeout plus long pour l'extraction
+          const controller = new AbortController()
+          const timeoutId = setTimeout(() => controller.abort(), 90000) // 90 secondes
+
           const response = await fetch(`${renderApiUrl}/api/extract-votes`, {
             method: "POST",
             headers: {
@@ -192,8 +198,12 @@ export async function POST(req: NextRequest) {
               Expires: "0",
             },
             body: JSON.stringify(requestData),
-            signal: AbortSignal.timeout(60000), // Augmenter à 60 secondes
+            signal: controller.signal,
           })
+
+          // Nettoyer le timeout
+          clearTimeout(timeoutId)
+
           const extractDuration = Date.now() - extractStartTime
           diagnostics.push(
             `Statut de la réponse Render: ${response.status} ${response.statusText} (${extractDuration}ms)`,
@@ -263,32 +273,24 @@ export async function POST(req: NextRequest) {
 
           return NextResponse.json(responseData)
         } catch (error: any) {
-          // Vérifier si c'est une erreur de timeout
-          if (error.name === "AbortError" || error.name === "TimeoutError") {
+          // Vérifier si c'est une erreur de timeout ou d'abandon
+          if (error.name === "AbortError" || error.name === "TimeoutError" || error.message.includes("aborted")) {
             diagnostics.push("L'opération a expiré (timeout). L'extraction prend trop de temps.")
             console.error("API - Timeout lors de l'appel à l'API Render:", error)
 
             // Retourner une réponse partielle ou utiliser le mode de secours
-            return NextResponse.json(
-              {
-                error: "L'opération a expiré. L'extraction des votes prend trop de temps.",
-                details: "Essayez de réduire la plage de dates ou de désactiver l'extraction des détails des votes.",
-                diagnostics,
-                renderApiStatus: "timeout",
-                renderApiMessage:
-                  "L'API Render a mis trop de temps à répondre. Utilisation du mode démo avec données simulées.",
-              },
-              { status: 408 },
-            ) // 408 Request Timeout
+            diagnostics.push("Utilisation des données simulées en fallback suite au timeout")
+            console.log("API - Utilisation des données simulées en fallback suite au timeout")
+            // Continuer avec le mode de secours
+          } else {
+            diagnostics.push(
+              `Erreur lors de l'appel à l'API Render: ${error instanceof Error ? error.message : String(error)}`,
+            )
+            console.error("API - Erreur lors de l'appel à l'API Render:", error)
+            diagnostics.push("Utilisation des données simulées en fallback")
+            console.log("API - Utilisation des données simulées en fallback")
+            // Continuer avec le mode de secours
           }
-
-          diagnostics.push(
-            `Erreur lors de l'appel à l'API Render: ${error instanceof Error ? error.message : String(error)}`,
-          )
-          console.error("API - Erreur lors de l'appel à l'API Render:", error)
-          diagnostics.push("Utilisation des données simulées en fallback")
-          console.log("API - Utilisation des données simulées en fallback")
-          // Continuer avec le mode de secours
         }
       } catch (error: any) {
         diagnostics.push(
