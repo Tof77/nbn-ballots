@@ -1360,17 +1360,12 @@ app.post("/api/extract-votes", async (req, res) => {
                     rowData.openingDate = text
                   } else if (header.includes("closing")) {
                     rowData.closingDate = text
-                  } else {
-                    rowData.closingDate = text
-                  }
-                  else
-                  if (header.includes("role")) {
+                  } else if (header.includes("role")) {
                     rowData.role = text
                   } else if (header.includes("source") && header.includes("type")) {
                     rowData.sourceType = text
                   } else if (header.includes("source") && !header.includes("type")) {
                     rowData.source = text
-                    \
                   } else if (i === 0) {
                     // Première colonne, probablement un identifiant ou une référence
                     rowData.ref = text
