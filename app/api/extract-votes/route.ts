@@ -3,7 +3,7 @@ import { type NextRequest, NextResponse } from "next/server"
 // Définir le runtime Node.js pour cette route API
 export const runtime = "nodejs"
 // Définir la durée maximale d'exécution à 60 secondes
-export const maxDuration = 60
+export const maxDuration = 90
 
 // Définir les interfaces pour les types de données
 interface VoteDetail {
@@ -38,7 +38,7 @@ function simulateDecryption(encryptedData: string): string {
       throw new Error("Format de données invalide")
     }
     return decoded.substring(5) // Enlever le préfixe "demo:"
-  } catch (error) {
+  } catch (error: any) {
     console.error("API - Erreur lors du déchiffrement simulé:", error)
     throw new Error("Échec du déchiffrement des données")
   }
@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
     let requestData: any
     try {
       requestData = JSON.parse(requestText)
-    } catch (error) {
+    } catch (error: any) {
       console.error("API - Erreur lors du parsing JSON:", error)
       diagnostics.push(`Erreur lors du parsing JSON: ${error instanceof Error ? error.message : String(error)}`)
       return NextResponse.json(
@@ -82,6 +82,13 @@ export async function POST(req: NextRequest) {
         },
         { status: 400 },
       )
+    }
+
+    // Vérifier si le mode démo est forcé
+    const forceDemoMode = requestData.forceDemoMode === true
+    if (forceDemoMode) {
+      diagnostics.push("Mode démo forcé par l'utilisateur")
+      console.log("API - Mode démo forcé par l'utilisateur")
     }
 
     // Journaliser les données reçues (sans les identifiants sensibles)
@@ -102,10 +109,12 @@ export async function POST(req: NextRequest) {
     diagnostics.push(`RENDER_API_URL: ${renderApiUrl || "non définie"}`)
     console.log("API - RENDER_API_URL:", renderApiUrl)
 
-    // Vérifier si l'API Render est configurée
-    if (!renderApiUrl) {
-      diagnostics.push("RENDER_API_URL non définie, utilisation des données simulées")
-      console.log("API - RENDER_API_URL non définie, utilisation des données simulées")
+    // Vérifier si l'API Render est configurée et si le mode démo n'est pas forcé
+    if (!renderApiUrl || forceDemoMode) {
+      if (!renderApiUrl) {
+        diagnostics.push("RENDER_API_URL non définie, utilisation des données simulées")
+        console.log("API - RENDER_API_URL non définie, utilisation des données simulées")
+      }
       // Continuer avec le mode de secours
     } else {
       try {
@@ -118,9 +127,14 @@ export async function POST(req: NextRequest) {
           const pingStartTime = Date.now()
           const pingResponse = await fetch(renderApiUrl, {
             method: "GET",
-            headers: { Accept: "application/json" },
+            headers: {
+              Accept: "application/json",
+              "Cache-Control": "no-cache, no-store, must-revalidate",
+              Pragma: "no-cache",
+              Expires: "0",
+            },
             // Ajouter un timeout pour éviter d'attendre trop longtemps
-            signal: AbortSignal.timeout(5000),
+            signal: AbortSignal.timeout(10000), // Augmenté à 10 secondes
           })
           const pingDuration = Date.now() - pingStartTime
           diagnostics.push(`Ping Render status: ${pingResponse.status} (${pingDuration}ms)`)
@@ -130,10 +144,17 @@ export async function POST(req: NextRequest) {
           try {
             const pingText = await pingResponse.text()
             diagnostics.push(`Ping Render response: ${pingText.substring(0, 200)}${pingText.length > 200 ? "..." : ""}`)
-          } catch (pingBodyError) {
+          } catch (pingBodyError: any) {
             diagnostics.push(
               `Erreur lors de la lecture du corps du ping: ${pingBodyError instanceof Error ? pingBodyError.message : String(pingBodyError)}`,
             )
+          }
+
+          // Vérifier si le service est en maintenance (503)
+          if (pingResponse.status === 503) {
+            diagnostics.push("L'API Render est en maintenance (503), utilisation des données simulées")
+            console.log("API - L'API Render est en maintenance (503), utilisation des données simulées")
+            throw new Error("L'API Render est en maintenance (503)")
           }
 
           if (!pingResponse.ok) {
@@ -143,7 +164,7 @@ export async function POST(req: NextRequest) {
             console.log("API - L'API Render n'est pas accessible, utilisation des données simulées")
             throw new Error(`L'API Render n'est pas accessible (status ${pingResponse.status})`)
           }
-        } catch (pingError) {
+        } catch (pingError: any) {
           diagnostics.push(
             `Erreur lors du ping de l'API Render: ${pingError instanceof Error ? pingError.message : String(pingError)}`,
           )
@@ -161,89 +182,115 @@ export async function POST(req: NextRequest) {
         // Appeler l'API Render avec un timeout plus long pour l'opération principale
         diagnostics.push("Appel à l'API Render pour l'extraction des votes...")
         const extractStartTime = Date.now()
-        const response = await fetch(`${renderApiUrl}/api/extract-votes`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(requestData),
-          signal: AbortSignal.timeout(30000), // 30 secondes de timeout
-        })
-        const extractDuration = Date.now() - extractStartTime
-        diagnostics.push(
-          `Statut de la réponse Render: ${response.status} ${response.statusText} (${extractDuration}ms)`,
-        )
-        console.log(
-          "API - Statut de la réponse Render:",
-          response.status,
-          response.statusText,
-          `(${extractDuration}ms)`,
-        )
-
-        // Récupérer la réponse
-        const responseText = await response.text()
-        diagnostics.push(`Longueur de la réponse Render: ${responseText.length}`)
-        console.log("API - Longueur de la réponse Render:", responseText.length)
-
-        let responseData: any
         try {
-          responseData = JSON.parse(responseText)
-        } catch (error) {
+          const response = await fetch(`${renderApiUrl}/api/extract-votes`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Cache-Control": "no-cache, no-store, must-revalidate",
+              Pragma: "no-cache",
+              Expires: "0",
+            },
+            body: JSON.stringify(requestData),
+            signal: AbortSignal.timeout(60000), // Augmenter à 60 secondes
+          })
+          const extractDuration = Date.now() - extractStartTime
           diagnostics.push(
-            `Erreur lors du parsing de la réponse JSON: ${error instanceof Error ? error.message : String(error)}`,
+            `Statut de la réponse Render: ${response.status} ${response.statusText} (${extractDuration}ms)`,
           )
-          diagnostics.push(`Début de la réponse: ${responseText.substring(0, 500)}...`)
-          console.error("API - Erreur lors du parsing de la réponse JSON:", error)
-          return NextResponse.json(
-            {
-              error: "Format de réponse invalide",
-              details: "La réponse de l'API externe n'est pas un JSON valide",
-              receivedResponse: responseText.substring(0, 500) + "...", // Afficher les 500 premiers caractères
+          console.log(
+            "API - Statut de la réponse Render:",
+            response.status,
+            response.statusText,
+            `(${extractDuration}ms)`,
+          )
+
+          // Vérifier si le service est en maintenance (503)
+          if (response.status === 503) {
+            diagnostics.push("L'API Render est en maintenance (503), utilisation des données simulées")
+            console.log("API - L'API Render est en maintenance (503), utilisation des données simulées")
+            throw new Error("L'API Render est en maintenance (503)")
+          }
+
+          // Récupérer la réponse
+          const responseText = await response.text()
+          diagnostics.push(`Longueur de la réponse Render: ${responseText.length}`)
+          console.log("API - Longueur de la réponse Render:", responseText.length)
+
+          let responseData: any
+          try {
+            responseData = JSON.parse(responseText)
+          } catch (error: any) {
+            diagnostics.push(
+              `Erreur lors du parsing de la réponse JSON: ${error instanceof Error ? error.message : String(error)}`,
+            )
+            diagnostics.push(`Début de la réponse: ${responseText.substring(0, 500)}...`)
+            console.error("API - Erreur lors du parsing de la réponse JSON:", error)
+            return NextResponse.json(
+              {
+                error: "Format de réponse invalide",
+                details: "La réponse de l'API externe n'est pas un JSON valide",
+                receivedResponse: responseText.substring(0, 500) + "...", // Afficher les 500 premiers caractères
+                diagnostics,
+                renderApiUrl,
+              },
+              { status: 502 },
+            )
+          }
+
+          if (!response.ok) {
+            diagnostics.push(`Erreur de l'API Render: ${JSON.stringify(responseData, null, 2)}`)
+            console.error("API - Erreur de l'API Render:", responseData)
+            return NextResponse.json(
+              {
+                error: "Erreur de l'API Render",
+                details: responseData.error || `Statut HTTP: ${response.status}`,
+                renderApiUrl,
+                diagnostics,
+                responseData,
+              },
+              { status: 502 },
+            )
+          }
+
+          diagnostics.push("Réponse de l'API Render reçue avec succès")
+          console.log("API - Réponse de l'API Render reçue avec succès")
+
+          // Ajouter les diagnostics à la réponse
+          if (!responseData.diagnostics) {
+            responseData.diagnostics = diagnostics
+          }
+
+          return NextResponse.json(responseData)
+        } catch (error: any) {
+          // Vérifier si c'est une erreur de timeout
+          if (error.name === 'AbortError' || error.name === 'TimeoutError') {
+            diagnostics.push("L'opération a expiré (timeout). L'extraction prend trop de temps.");
+            console.error("API - Timeout lors de l'appel à l'API Render:", error);
+
+            // Retourner une réponse partielle ou utiliser le mode de secours
+            return NextResponse.json({
+              error: "L'opération a expiré. L'extraction des votes prend trop de temps.",
+              details: "Essayez de réduire la plage de dates ou de désactiver l'extraction des détails des votes.",
               diagnostics,
-              renderApiUrl,
-            },
-            { status: 502 },
+              renderApiStatus: "timeout",
+              renderApiMessage: "L'API Render a mis trop de temps à répondre. Utilisation du mode démo avec données simulées.",
+            }, { status: 408 }); // 408 Request Timeout
+          }
+
+          diagnostics.push(
+            `Erreur lors de l'appel à l'API Render: ${error instanceof Error ? error.message : String(error)}`,
           )
+          console.error("API - Erreur lors de l'appel à l'API Render:", error)
+          diagnostics.push("Utilisation des données simulées en fallback")
+          console.log("API - Utilisation des données simulées en fallback")
+          // Continuer avec le mode de secours
         }
-
-        if (!response.ok) {
-          diagnostics.push(`Erreur de l'API Render: ${JSON.stringify(responseData, null, 2)}`)
-          console.error("API - Erreur de l'API Render:", responseData)
-          return NextResponse.json(
-            {
-              error: "Erreur de l'API Render",
-              details: responseData.error || `Statut HTTP: ${response.status}`,
-              renderApiUrl,
-              diagnostics,
-              responseData,
-            },
-            { status: 502 },
-          )
-        }
-
-        diagnostics.push("Réponse de l'API Render reçue avec succès")
-        console.log("API - Réponse de l'API Render reçue avec succès")
-
-        // Ajouter les diagnostics à la réponse
-        if (!responseData.diagnostics) {
-          responseData.diagnostics = diagnostics
-        }
-
-        return NextResponse.json(responseData)
-      } catch (error) {
-        diagnostics.push(
-          `Erreur lors de l'appel à l'API Render: ${error instanceof Error ? error.message : String(error)}`,
-        )
-        console.error("API - Erreur lors de l'appel à l'API Render:", error)
-        diagnostics.push("Utilisation des données simulées en fallback")
-        console.log("API - Utilisation des données simulées en fallback")
-        // Continuer avec le mode de secours
       }
-    }
 
     // Si l'API Render n'est pas disponible ou si une erreur s'est produite, utiliser les données simulées
-    const { commissionId, startDate, extractDetails = true, credentials } = requestData
-
+    const { commissionId, startDate, extractDetails = true, credentials } = requestData;
+\
     // Vérifier que les identifiants chiffrés sont fournis
     if (!credentials || !credentials.encryptedUsername || !credentials.encryptedPassword) {
       diagnostics.push("Identifiants chiffrés manquants")
@@ -266,7 +313,7 @@ export async function POST(req: NextRequest) {
       password = simulateDecryption(credentials.encryptedPassword)
       diagnostics.push("Identifiants déchiffrés avec succès")
       console.log("API - Identifiants déchiffrés avec succès")
-    } catch (error) {
+    } catch (error: any) {
       diagnostics.push(`Erreur lors du déchiffrement: ${error instanceof Error ? error.message : String(error)}`)
       console.error("API - Erreur lors du déchiffrement:", error)
       return NextResponse.json(
@@ -553,11 +600,13 @@ export async function POST(req: NextRequest) {
         startDate: startDate,
         numVotesGenerated: votes.length,
         source: "fallback",
+        demoMode: true,
       },
       diagnostics,
       renderApiStatus: "unavailable",
+      renderApiMessage: "L'API Render est temporairement indisponible. Utilisation du mode démo avec données simulées.",
     })
-  } catch (error) {
+  } catch (error: any) {
     const totalDuration = Date.now() - startTime
     diagnostics.push(`Durée totale jusqu'à l'erreur: ${totalDuration}ms`)
     diagnostics.push(`Erreur générale: ${error instanceof Error ? error.message : String(error)}`)
