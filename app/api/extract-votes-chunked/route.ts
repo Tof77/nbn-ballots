@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 
 // Définir le runtime Node.js pour cette route API
+//FOrcer le push
 export const runtime = "nodejs"
 // Définir la durée maximale d'exécution à 90 secondes
 export const maxDuration = 90
