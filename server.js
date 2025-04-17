@@ -290,7 +290,7 @@ app.post("/api/extract-votes", async (req, res) => {
         await Promise.all([page.click(loginButtonSelector), waitForNavigationSafely(page, { timeout: 60000 })])
 
         // Attendre un peu pour s'assurer que la page est chargée
-        await delay(10000) // Augmenter le délai à 10 secondes
+        await delay(5000) // Augmenter le délai à 10 secondes
       } else {
         console.log("Déjà connecté ou redirection automatique non effectuée")
       }
@@ -340,7 +340,7 @@ app.post("/api/extract-votes", async (req, res) => {
         )
 
         // Attendre que la page soit complètement chargée
-        await delay(15000) // Augmenter le délai à 15 secondes
+        await delay(8000) // Augmenter le délai à 15 secondes
       } catch (error) {
         console.error("Erreur lors de la navigation vers la page de recherche:", error)
         await page.screenshot({ path: "/tmp/navigation-error.png" })
@@ -521,8 +521,18 @@ app.post("/api/extract-votes", async (req, res) => {
         if (extractDetails && votes.length > 0) {
           console.log("Extraction des détails des votes...")
 
+          const startTime = Date.now()
+          const MAX_EXTRACTION_TIME = 45000 // 45 secondes maximum pour l'extraction
+
           for (let i = 0; i < votes.length; i++) {
             const vote = votes[i]
+
+            // Vérifier si on approche du timeout
+            const elapsedTime = Date.now() - startTime
+            if (elapsedTime > MAX_EXTRACTION_TIME) {
+              console.log(`Temps d'extraction maximum atteint (${elapsedTime}ms). Arrêt de l'extraction des détails.`)
+              break // Sortir de la boucle pour éviter un timeout
+            }
 
             // Vérifier si le vote a des détails à extraire et une URL de détails
             if (vote.votes && vote.votes.includes("vote")) {
