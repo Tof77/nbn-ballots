@@ -17,5 +17,11 @@
   },
   "env": {
     "RENDER_API_URL": "https://nbn-ballots-api.onrender.com"
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/scheduled-ping",
+      "schedule": "*/5 * * * *"
+    }
+  ]
 }
