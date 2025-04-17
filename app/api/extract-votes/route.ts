@@ -1,5 +1,3 @@
-// Améliorer la gestion des timeouts dans l'API d'extraction
-
 import { type NextRequest, NextResponse } from "next/server"
 
 // Définir le runtime Node.js pour cette route API
@@ -29,6 +27,11 @@ interface Vote {
   sourceType: string
   source: string
   voteDetails?: VoteDetail[] // Propriété optionnelle pour les détails des votes
+}
+
+interface ScreenshotInfo {
+  name: string
+  url: string
 }
 
 // Fonction pour déchiffrer les données simulées
@@ -127,7 +130,7 @@ export async function POST(req: NextRequest) {
         try {
           diagnostics.push("Ping de l'API Render...")
           const pingStartTime = Date.now()
-          const pingResponse = await fetch(renderApiUrl, {
+          const pingResponse = await fetch(`${renderApiUrl}/ping?cache=${Date.now()}`, {
             method: "GET",
             headers: {
               Accept: "application/json",
@@ -135,7 +138,7 @@ export async function POST(req: NextRequest) {
               Pragma: "no-cache",
               Expires: "0",
             },
-            // Ajouter un timeout plus long pour le ping initial
+            // Ajouter un timeout pour éviter d'attendre trop longtemps
             signal: AbortSignal.timeout(15000), // 15 secondes
           })
           const pingDuration = Date.now() - pingStartTime
@@ -187,9 +190,16 @@ export async function POST(req: NextRequest) {
         try {
           // Ajouter un timeout plus long pour l'extraction
           const controller = new AbortController()
-          const timeoutId = setTimeout(() => controller.abort(), 90000) // 90 secondes
+          const timeoutId = setTimeout(() => {
+            diagnostics.push("Timeout manuel déclenché après 60 secondes")
+            controller.abort(new Error("Timeout manuel après 60 secondes"))
+          }, 60000) // 60 secondes
 
-          const response = await fetch(`${renderApiUrl}/api/extract-votes`, {
+          // Ajouter un paramètre de cache-buster pour éviter les réponses en cache
+          const timestamp = Date.now()
+          const urlWithCacheBuster = `${renderApiUrl}/api/extract-votes?cache=${timestamp}`
+
+          const response = await fetch(urlWithCacheBuster, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -197,7 +207,12 @@ export async function POST(req: NextRequest) {
               Pragma: "no-cache",
               Expires: "0",
             },
-            body: JSON.stringify(requestData),
+            body: JSON.stringify({
+              ...requestData,
+              // Ajouter un paramètre pour indiquer que c'est une requête depuis Vercel
+              fromVercel: true,
+              vercelTimestamp: timestamp,
+            }),
             signal: controller.signal,
           })
 
@@ -222,8 +237,14 @@ export async function POST(req: NextRequest) {
             throw new Error("L'API Render est en maintenance (503)")
           }
 
-          // Récupérer la réponse
-          const responseText = await response.text()
+          // Récupérer la réponse avec un timeout pour la lecture du corps
+          const responseTextPromise = response.text()
+          const responseTextTimeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error("Timeout lors de la lecture du corps de la réponse")), 10000)
+          })
+
+          const responseText = (await Promise.race([responseTextPromise, responseTextTimeoutPromise])) as string
+
           diagnostics.push(`Longueur de la réponse Render: ${responseText.length}`)
           console.log("API - Longueur de la réponse Render:", responseText.length)
 
@@ -269,18 +290,40 @@ export async function POST(req: NextRequest) {
           // Ajouter les diagnostics à la réponse
           if (!responseData.diagnostics) {
             responseData.diagnostics = diagnostics
+          } else {
+            responseData.diagnostics = [
+              ...diagnostics,
+              "--- Diagnostics de l'API Render ---",
+              ...responseData.diagnostics,
+            ]
+          }
+
+          // Vérifier si la réponse contient des URLs de captures d'écran
+          if (responseData.debug?.screenshotUrls) {
+            diagnostics.push(`${responseData.debug.screenshotUrls.length} captures d'écran disponibles`)
+            console.log(`API - ${responseData.debug.screenshotUrls.length} captures d'écran disponibles`)
           }
 
           return NextResponse.json(responseData)
         } catch (error: any) {
           // Vérifier si c'est une erreur de timeout ou d'abandon
-          if (error.name === "AbortError" || error.name === "TimeoutError" || error.message.includes("aborted")) {
+          const isTimeoutError =
+            error.name === "AbortError" ||
+            error.name === "TimeoutError" ||
+            error.message.includes("aborted") ||
+            error.message.includes("timeout") ||
+            error.message.includes("Timeout")
+
+          if (isTimeoutError) {
             diagnostics.push("L'opération a expiré (timeout). L'extraction prend trop de temps.")
             console.error("API - Timeout lors de l'appel à l'API Render:", error)
 
-            // Retourner une réponse partielle ou utiliser le mode de secours
-            diagnostics.push("Utilisation des données simulées en fallback suite au timeout")
-            console.log("API - Utilisation des données simulées en fallback suite au timeout")
+            // Détection du mode de démonstration suite au timeout
+            diagnostics.push(
+              `Détection du mode de démonstration suite à l'erreur: ${error instanceof Error ? error.message : String(error)}`,
+            )
+            diagnostics.push("Activation du mode de démonstration avec données simulées")
+            console.log("API - Activation du mode de démonstration avec données simulées suite au timeout")
             // Continuer avec le mode de secours
           } else {
             diagnostics.push(
@@ -355,10 +398,22 @@ export async function POST(req: NextRequest) {
     // Générer des données réalistes basées sur la capture d'écran fournie
     const votes: Vote[] = []
 
+    // Créer un tableau pour simuler des URLs de captures d'écran
+    const simulatedScreenshots: ScreenshotInfo[] = [
+      { name: "Page initiale", url: "https://render-api.example.com/screenshots/simulated-initial-page.png" },
+      { name: "Page de connexion", url: "https://render-api.example.com/screenshots/simulated-login-page.png" },
+      { name: "Après connexion", url: "https://render-api.example.com/screenshots/simulated-after-login.png" },
+      { name: "Page de recherche", url: "https://render-api.example.com/screenshots/simulated-search-page.png" },
+      {
+        name: "Résultats de recherche",
+        url: "https://render-api.example.com/screenshots/simulated-search-results.png",
+      },
+    ]
+
     // Si la commission est E088/089, utiliser les données de la capture d'écran
     if (commissionCode === "E088/089") {
-      diagnostics.push("Génération de données pour E088/089 basées sur la capture d'écran")
-      console.log("API - Génération de données pour E088/089 basées sur la capture d'écran")
+      diagnostics.push("MODE DÉMONSTRATION: Génération de données pour E088/089 basées sur la capture d'écran")
+      console.log("API - MODE DÉMONSTRATION: Génération de données pour E088/089 basées sur la capture d'écran")
 
       // Données extraites de la capture d'écran
       const realVotes: Vote[] = [
@@ -546,8 +601,8 @@ export async function POST(req: NextRequest) {
       votes.push(...realVotes)
     } else {
       // Pour les autres commissions, générer des données fictives mais réalistes
-      diagnostics.push(`Génération de données fictives pour la commission ${commissionCode}`)
-      console.log(`API - Génération de données fictives pour la commission ${commissionCode}`)
+      diagnostics.push(`MODE DÉMONSTRATION: Génération de données simulées pour la commission ${commissionCode}`)
+      console.log(`API - MODE DÉMONSTRATION: Génération de données simulées pour la commission ${commissionCode}`)
 
       // Nombre de votes à générer
       const numVotes = 5
@@ -614,12 +669,13 @@ export async function POST(req: NextRequest) {
         username: username,
         startDate: startDate,
         numVotesGenerated: votes.length,
-        source: "fallback",
+        source: "edge-fallback",
         demoMode: true,
+        screenshotUrls: simulatedScreenshots, // Ajouter les URLs simulées des captures d'écran
       },
       diagnostics,
       renderApiStatus: "unavailable",
-      renderApiMessage: "L'API Render est temporairement indisponible. Utilisation du mode démo avec données simulées.",
+      renderApiMessage: "L'API Render n'est pas disponible. Utilisation du mode démonstration avec données simulées.",
     })
   } catch (error: any) {
     const totalDuration = Date.now() - startTime
