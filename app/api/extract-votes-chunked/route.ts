@@ -21,7 +21,6 @@ interface ChunkRequest {
     encryptedPassword: string
   }
 }
-
 export async function POST(req: NextRequest) {
   const diagnostics: string[] = []
   const startTime = Date.now()
