@@ -3,10 +3,14 @@
   "regions": ["fra1"],
   "functions": {
     "app/api/extract-votes/route.ts": {
-      "memory": 1024,
-      "maxDuration": 60
+      "memory": 1536,
+      "maxDuration": 90
     },
     "app/api/extract-votes-edge/route.ts": {
+      "memory": 1536,
+      "maxDuration": 90
+    },
+    "app/api/warmup-render/route.ts": {
       "memory": 1024,
       "maxDuration": 60
     }
@@ -15,3 +19,4 @@
     "RENDER_API_URL": "https://nbn-ballots-api.onrender.com"
   }
 }
+
