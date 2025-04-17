@@ -2,7 +2,6 @@ import { NextResponse } from "next/server"
 
 // Cette route permet de "réchauffer" l'API Render avant de l'utiliser
 // Les plans gratuits de Render se mettent en veille après une période d'inactivité
-//commentaire pour forcer le push
 export async function GET() {
   const diagnostics: string[] = []
   const startTime = Date.now()
@@ -15,6 +14,7 @@ export async function GET() {
         success: false,
         message: "RENDER_API_URL non définie",
         diagnostics,
+        status: 500,
       })
     }
 
@@ -28,11 +28,20 @@ export async function GET() {
     let fetchError: any = null
 
     try {
-      response = await fetch(renderApiUrl, {
+      // Ajouter un paramètre de cache-buster pour éviter les réponses en cache
+      const timestamp = Date.now()
+      const urlWithCacheBuster = `${renderApiUrl}?cache=${timestamp}`
+
+      response = await fetch(urlWithCacheBuster, {
         method: "GET",
-        headers: { Accept: "application/json" },
+        headers: {
+          Accept: "application/json",
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          Pragma: "no-cache",
+          Expires: "0",
+        },
         // Timeout plus long pour permettre à Render de démarrer
-        signal: AbortSignal.timeout(20000), // Augmenté à 20 secondes
+        signal: AbortSignal.timeout(30000), // Augmenté à 30 secondes
       })
 
       const pingDuration = Date.now() - pingStartTime
@@ -56,24 +65,41 @@ export async function GET() {
       )
     }
 
-    // Si nous avons une erreur de timeout ou une erreur 504, c'est probablement que Render est en train de démarrer
-    if (fetchError || (response && response.status === 504)) {
+    // Si nous avons une erreur de timeout ou une erreur 502/504, c'est probablement que Render est en train de démarrer
+    if (fetchError || (response && (response.status === 504 || response.status === 502))) {
       const errorMessage = fetchError
         ? `Erreur de connexion: ${fetchError instanceof Error ? fetchError.message : String(fetchError)}`
-        : "Erreur 504 Gateway Timeout: Le serveur Render est probablement en cours de démarrage"
+        : response?.status === 502
+          ? "Erreur 502 Bad Gateway: Le serveur Render est probablement en cours de démarrage ou surchargé"
+          : "Erreur 504 Gateway Timeout: Le serveur Render est probablement en cours de démarrage"
 
       diagnostics.push(errorMessage)
       console.log(errorMessage)
 
+      // Ajouter des informations de débogage supplémentaires pour l'erreur 502
+      let debugInfo = {}
+      if (response?.status === 502) {
+        debugInfo = {
+          headers: Object.fromEntries(response.headers.entries()),
+          url: response.url,
+          redirected: response.redirected,
+          type: response.type,
+          responseTextSample: responseText.substring(0, 500),
+        }
+        diagnostics.push(`Informations de débogage pour l'erreur 502: ${JSON.stringify(debugInfo, null, 2)}`)
+      }
+
       return NextResponse.json({
         success: false,
-        status: "starting",
+        status: response?.status || 0,
         statusMessage: "starting",
         responseTime: `${Date.now() - pingStartTime}ms`,
         totalTime: `${Date.now() - startTime}ms`,
-        message: "L'API Render est en cours de démarrage. Veuillez réessayer dans 30-60 secondes.",
+        message:
+          "L'API Render est en cours de démarrage ou rencontre des problèmes. Veuillez réessayer dans 30-60 secondes.",
         error: errorMessage,
         diagnostics,
+        debugInfo,
       })
     }
 
@@ -117,6 +143,11 @@ export async function GET() {
     if (response.status >= 200 && response.status < 300) {
       isReady = true
       statusMessage = "active"
+    } else if (response.status === 502) {
+      // 502 Bad Gateway - Render est probablement en train de démarrer ou surchargé
+      isReady = false
+      statusMessage = "starting"
+      diagnostics.push("Erreur 502 Bad Gateway: Le serveur Render est probablement en cours de démarrage ou surchargé")
     } else if (response.status === 504) {
       // 504 Gateway Timeout - Render est probablement en train de démarrer
       isReady = false
@@ -154,6 +185,7 @@ export async function GET() {
       responseBody: responseText.substring(0, 500),
       jsonResponse,
       diagnostics,
+      headers: Object.fromEntries(response.headers.entries()),
     })
   } catch (error) {
     const totalDuration = Date.now() - startTime
