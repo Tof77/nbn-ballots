@@ -21,6 +21,7 @@ interface ChunkRequest {
     encryptedPassword: string
   }
 }
+
 export async function POST(req: NextRequest) {
   const diagnostics: string[] = []
   const startTime = Date.now()
@@ -116,21 +117,24 @@ export async function POST(req: NextRequest) {
       ]
 
       return NextResponse.json(responseData)
-    } catch (error) {
+    } catch (error: unknown) {
       // Vérifier si c'est une erreur de timeout
-      if (error.name === "AbortError" || error.name === "TimeoutError") {
-        return NextResponse.json(
-          {
-            error: "Timeout lors de l'appel à l'API Render",
-            details: `L'API Render a mis trop de temps à répondre pour le chunk ${requestData.chunkIndex + 1}/${requestData.totalChunks}`,
-            diagnostics: [
-              ...diagnostics,
-              `Durée avant timeout: ${Date.now() - startTime}ms`,
-              `Chunk ${requestData.chunkIndex + 1}/${requestData.totalChunks} a expiré`,
-            ],
-          },
-          { status: 408 },
-        )
+      if (error && typeof error === "object" && "name" in error) {
+        const errorWithName = error as { name: string }
+        if (errorWithName.name === "AbortError" || errorWithName.name === "TimeoutError") {
+          return NextResponse.json(
+            {
+              error: "Timeout lors de l'appel à l'API Render",
+              details: `L'API Render a mis trop de temps à répondre pour le chunk ${requestData.chunkIndex + 1}/${requestData.totalChunks}`,
+              diagnostics: [
+                ...diagnostics,
+                `Durée avant timeout: ${Date.now() - startTime}ms`,
+                `Chunk ${requestData.chunkIndex + 1}/${requestData.totalChunks} a expiré`,
+              ],
+            },
+            { status: 408 },
+          )
+        }
       }
 
       // Autres erreurs
@@ -143,7 +147,7 @@ export async function POST(req: NextRequest) {
         { status: 500 },
       )
     }
-  } catch (error) {
+  } catch (error: unknown) {
     return NextResponse.json(
       {
         error: "Erreur lors du traitement de la requête",
