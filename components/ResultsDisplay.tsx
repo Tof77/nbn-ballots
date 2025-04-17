@@ -6,6 +6,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
+import { BugIcon, ImageIcon } from "lucide-react"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 
 interface VoteDetail {
   participant: string
@@ -30,14 +32,23 @@ interface Vote {
   voteDetails?: VoteDetail[]
 }
 
-interface ResultsDisplayProps {
-  results: Vote[]
+interface ScreenshotInfo {
+  name: string
+  url: string
 }
 
-export default function ResultsDisplay({ results }: ResultsDisplayProps) {
+// Ajoutons une nouvelle prop pour indiquer le mode démo et les captures d'écran
+interface ResultsDisplayProps {
+  results: Vote[]
+  demoMode?: boolean
+  screenshotUrls?: ScreenshotInfo[]
+}
+
+export default function ResultsDisplay({ results, demoMode = false, screenshotUrls = [] }: ResultsDisplayProps) {
   const [searchTerm, setSearchTerm] = useState("")
   const [sortField, setSortField] = useState<keyof Vote>("closingDate")
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc")
+  const [selectedScreenshot, setSelectedScreenshot] = useState<ScreenshotInfo | null>(null)
 
   const handleSort = (field: keyof Vote) => {
     if (field === sortField) {
@@ -164,8 +175,72 @@ export default function ResultsDisplay({ results }: ResultsDisplayProps) {
     document.body.removeChild(link)
   }
 
+  // Ajoutons un indicateur visuel pour le mode démo en haut du composant
   return (
     <Card className="bg-white rounded-xl shadow p-6">
+      {demoMode && (
+        <div className="mb-4 p-2 bg-blue-50 border border-blue-200 rounded-md text-blue-800 text-sm">
+          <div className="flex items-center gap-2">
+            <BugIcon className="h-4 w-4" />
+            <span className="font-medium">Mode Démonstration</span>
+          </div>
+          <p className="text-xs mt-1">
+            Les données affichées sont des exemples générés automatiquement et ne proviennent pas d'isolutions.iso.org.
+          </p>
+        </div>
+      )}
+
+      {/* Afficher les captures d'écran si disponibles */}
+      {screenshotUrls && screenshotUrls.length > 0 && (
+        <div className="mb-4">
+          <h3 className="text-sm font-medium mb-2">Captures d'écran de débogage disponibles</h3>
+          <div className="flex flex-wrap gap-2">
+            {screenshotUrls.map((screenshot, index) => (
+              <Dialog key={index}>
+                <DialogTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-xs flex items-center gap-1"
+                    onClick={() => setSelectedScreenshot(screenshot)}
+                  >
+                    <ImageIcon className="h-3 w-3" />
+                    {screenshot.name}
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-4xl">
+                  <DialogHeader>
+                    <DialogTitle>{screenshot.name}</DialogTitle>
+                  </DialogHeader>
+                  <div className="overflow-auto max-h-[80vh]">
+                    <img
+                      src={screenshot.url || "/placeholder.svg"}
+                      alt={screenshot.name}
+                      className="w-full object-contain"
+                      onError={(e) => {
+                        const target = e.target as HTMLImageElement
+                        target.src = "/placeholder.svg?key=jxjdr"
+                        target.alt = "Image non disponible"
+                      }}
+                    />
+                  </div>
+                  <div className="mt-2 text-center">
+                    <a
+                      href={screenshot.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:underline text-sm"
+                    >
+                      Ouvrir dans un nouvel onglet
+                    </a>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-xl font-semibold">Résultats ({results.length} votes)</h2>
 
