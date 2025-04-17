@@ -35,7 +35,7 @@ interface ApiResponse {
   renderApiMessage?: string
 }
 
-// Interface pour le résultat du réchauffement de l'API
+// Interface pour le résultat du réchauffement de l'API Render
 interface WarmupResult {
   success: boolean
   status: string
@@ -175,8 +175,13 @@ function getHttpErrorInfo(statusCode: number): { title: string; description: str
   }
 }
 
+interface ScreenshotInfo {
+  name: string
+  url: string
+}
+
 interface VoteExtractionFormProps {
-  onResultsReceived: (results: any[], isDemoMode?: boolean, screenshots?: string[]) => void
+  onResultsReceived: (results: any[], isDemoMode?: boolean, screenshots?: ScreenshotInfo[]) => void
 }
 
 export default function VoteExtractionForm({ onResultsReceived }: VoteExtractionFormProps) {
@@ -453,7 +458,6 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
         const isDemoMode = !!json.debug?.demoMode
         const screenshots = json.debug?.screenshotUrls || []
         onResultsReceived(json.votes || [], isDemoMode, screenshots)
-
         // Effacer le mot de passe après utilisation pour plus de sécurité
         setPassword("")
       } catch (error: unknown) {
