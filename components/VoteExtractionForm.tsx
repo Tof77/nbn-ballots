@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -10,7 +10,16 @@ import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Loader2, ShieldIcon, BugIcon, WifiIcon, WifiOffIcon, ClockIcon } from "lucide-react"
+import {
+  Loader2,
+  ShieldIcon,
+  BugIcon,
+  WifiIcon,
+  WifiOffIcon,
+  ClockIcon,
+  ChevronUpIcon,
+  ChevronDownIcon,
+} from "lucide-react"
 import { encryptCredentials } from "@/utils/encryption"
 
 // Interface pour la réponse de l'API
@@ -30,17 +39,21 @@ interface WarmupResult {
   status: string
   statusMessage?: string
   message: string
+  statusCode?: number
+  errorDetails?: string
+  responseText?: string
 }
 
 // Ajouter une nouvelle fonction pour réchauffer l'API Render avant l'extraction
-async function warmupRenderApi(): Promise<WarmupResult> {
+async function warmupRenderApi(queryParams = ""): Promise<WarmupResult> {
   try {
     console.log("Réchauffement de l'API Render...")
-    const response = await fetch("/api/warmup-render", {
+    const response = await fetch(`/api/warmup-render${queryParams}`, {
       // Ajouter un cache-buster pour éviter les réponses en cache
       headers: {
-        "Cache-Control": "no-cache",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
         Pragma: "no-cache",
+        Expires: "0",
       },
       // Ajouter un timestamp pour éviter le cache
       cache: "no-store",
@@ -56,6 +69,7 @@ async function warmupRenderApi(): Promise<WarmupResult> {
         success: false,
         status: "error",
         message: `Erreur lors de la lecture de la réponse: ${textError instanceof Error ? textError.message : String(textError)}`,
+        statusCode: 0,
       }
     }
 
@@ -70,6 +84,8 @@ async function warmupRenderApi(): Promise<WarmupResult> {
         success: false,
         status: "error",
         message: `La réponse n'est pas un JSON valide: ${jsonError instanceof Error ? jsonError.message : String(jsonError)}`,
+        statusCode: response.status,
+        responseText: responseText.substring(0, 500),
       }
     }
 
@@ -82,6 +98,7 @@ async function warmupRenderApi(): Promise<WarmupResult> {
         status: "starting",
         statusMessage: "starting",
         message: data.message || "L'API Render est en cours de démarrage, veuillez réessayer dans 30-60 secondes",
+        statusCode: data.status || response.status,
       }
     }
 
@@ -90,6 +107,8 @@ async function warmupRenderApi(): Promise<WarmupResult> {
       status: data.statusMessage || (data.success ? "active" : "inactive"),
       statusMessage: data.statusMessage,
       message: data.message || "Statut de l'API inconnu",
+      statusCode: data.status || response.status,
+      errorDetails: data.error || data.details || null,
     }
   } catch (error) {
     console.error("Erreur lors du réchauffement:", error)
@@ -97,6 +116,7 @@ async function warmupRenderApi(): Promise<WarmupResult> {
       success: false,
       status: "error",
       message: error instanceof Error ? error.message : String(error),
+      statusCode: 0,
     }
   }
 }
@@ -120,13 +140,16 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
     status: "unknown" | "active" | "inactive" | "error" | "starting"
     message: string
     lastChecked: Date | null
+    statusCode?: number
   }>({
     status: "unknown",
     message: "Statut de l'API Render inconnu",
     lastChecked: null,
+    statusCode: 0,
   })
   const [isWarmingUp, setIsWarmingUp] = useState(false)
   const [demoMode, setDemoMode] = useState(false)
+  const [showErrorDetails, setShowErrorDetails] = useState(false)
 
   // Vérifier que la clé publique est disponible au chargement du composant
   useEffect(() => {
@@ -152,10 +175,19 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
   }, [])
 
   // Fonction pour vérifier l'état de l'API Render
-  const checkRenderApiStatus = async () => {
+  const checkRenderApiStatus = useCallback(async () => {
     setIsWarmingUp(true)
     try {
-      const result = await warmupRenderApi()
+      // Ajouter un paramètre de cache-buster pour éviter les réponses en cache
+      const timestamp = new Date().getTime()
+      const result = await warmupRenderApi(`?cache=${timestamp}`)
+
+      // Ajouter plus de détails sur l'erreur
+      let errorDetails = ""
+      if (result.status === "error" || !result.success) {
+        errorDetails = result.errorDetails || result.message || "Erreur inconnue"
+      }
+
       setRenderApiStatus({
         status: result.success
           ? "active"
@@ -164,19 +196,21 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
             : result.status === "error"
               ? "error"
               : "inactive",
-        message: result.message,
+        message: result.message + (errorDetails ? ` (Détails: ${errorDetails})` : ""),
         lastChecked: new Date(),
+        statusCode: result.statusCode || 0,
       })
     } catch (error) {
       setRenderApiStatus({
         status: "error",
         message: error instanceof Error ? error.message : String(error),
         lastChecked: new Date(),
+        statusCode: 0,
       })
     } finally {
       setIsWarmingUp(false)
     }
-  }
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -371,27 +405,72 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
     }
 
     return (
-      <div className={`flex items-center gap-2 p-2 rounded-md border ${getStatusClass()} text-sm mb-4`}>
-        {isWarmingUp ? <Loader2 className="h-4 w-4 animate-spin" /> : getIcon()}
-        <div className="flex-1">
-          <p className="font-medium">{getStatusText()}</p>
-          <p className="text-xs">{renderApiStatus.message}</p>
-          {renderApiStatus.lastChecked && (
-            <p className="text-xs opacity-75">
-              Dernière vérification: {renderApiStatus.lastChecked.toLocaleTimeString()}
-            </p>
-          )}
+      <div className={`flex flex-col gap-2 p-2 rounded-md border ${getStatusClass()} text-sm mb-4`}>
+        <div className="flex items-center gap-2">
+          {isWarmingUp ? <Loader2 className="h-4 w-4 animate-spin" /> : getIcon()}
+          <div className="flex-1">
+            <p className="font-medium">{getStatusText()}</p>
+            <p className="text-xs">{renderApiStatus.message}</p>
+            {renderApiStatus.statusCode && <p className="text-xs">Code de statut: {renderApiStatus.statusCode}</p>}
+            {renderApiStatus.lastChecked && (
+              <p className="text-xs opacity-75">
+                Dernière vérification: {renderApiStatus.lastChecked.toLocaleTimeString()}
+              </p>
+            )}
+          </div>
+          <Button variant="outline" size="sm" onClick={checkRenderApiStatus} disabled={isWarmingUp} className="text-xs">
+            {isWarmingUp ? (
+              <span className="flex items-center gap-1">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Vérification...
+              </span>
+            ) : (
+              "Vérifier"
+            )}
+          </Button>
         </div>
-        <Button variant="outline" size="sm" onClick={checkRenderApiStatus} disabled={isWarmingUp} className="text-xs">
-          {isWarmingUp ? (
-            <span className="flex items-center gap-1">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              Vérification...
-            </span>
-          ) : (
-            "Vérifier"
-          )}
-        </Button>
+
+        {/* Ajouter un bouton pour afficher les détails de l'erreur si le statut est 502 */}
+        {renderApiStatus.statusCode === 502 && (
+          <div className="mt-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowErrorDetails(!showErrorDetails)}
+              className="text-xs w-full flex items-center justify-center"
+            >
+              {showErrorDetails ? "Masquer les détails" : "Afficher les détails de l'erreur 502"}
+              {showErrorDetails ? (
+                <ChevronUpIcon className="h-3 w-3 ml-1" />
+              ) : (
+                <ChevronDownIcon className="h-3 w-3 ml-1" />
+              )}
+            </Button>
+
+            {showErrorDetails && (
+              <div className="mt-2 p-2 bg-red-50 rounded-md text-xs">
+                <p className="font-medium mb-1">Informations de débogage pour l'erreur 502:</p>
+                <p>
+                  L'erreur 502 (Bad Gateway) indique généralement un problème de communication entre le serveur proxy
+                  (Vercel) et le serveur d'application (Render).
+                </p>
+                <p className="mt-1">Causes possibles:</p>
+                <ul className="list-disc pl-4 mt-1">
+                  <li>Le serveur Render est en cours de démarrage (30-60 secondes)</li>
+                  <li>Le serveur Render est surchargé ou a planté</li>
+                  <li>Un problème de réseau entre Vercel et Render</li>
+                  <li>Un timeout lors du traitement de la requête</li>
+                </ul>
+                <p className="mt-1">Solutions:</p>
+                <ul className="list-disc pl-4 mt-1">
+                  <li>Attendre quelques minutes et réessayer</li>
+                  <li>Vérifier le statut du service Render dans votre tableau de bord</li>
+                  <li>Redémarrer manuellement le service Render</li>
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     )
   }
