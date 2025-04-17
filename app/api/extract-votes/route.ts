@@ -264,18 +264,22 @@ export async function POST(req: NextRequest) {
           return NextResponse.json(responseData)
         } catch (error: any) {
           // Vérifier si c'est une erreur de timeout
-          if (error.name === 'AbortError' || error.name === 'TimeoutError') {
-            diagnostics.push("L'opération a expiré (timeout). L'extraction prend trop de temps.");
-            console.error("API - Timeout lors de l'appel à l'API Render:", error);
+          if (error.name === "AbortError" || error.name === "TimeoutError") {
+            diagnostics.push("L'opération a expiré (timeout). L'extraction prend trop de temps.")
+            console.error("API - Timeout lors de l'appel à l'API Render:", error)
 
             // Retourner une réponse partielle ou utiliser le mode de secours
-            return NextResponse.json({
-              error: "L'opération a expiré. L'extraction des votes prend trop de temps.",
-              details: "Essayez de réduire la plage de dates ou de désactiver l'extraction des détails des votes.",
-              diagnostics,
-              renderApiStatus: "timeout",
-              renderApiMessage: "L'API Render a mis trop de temps à répondre. Utilisation du mode démo avec données simulées.",
-            }, { status: 408 }); // 408 Request Timeout
+            return NextResponse.json(
+              {
+                error: "L'opération a expiré. L'extraction des votes prend trop de temps.",
+                details: "Essayez de réduire la plage de dates ou de désactiver l'extraction des détails des votes.",
+                diagnostics,
+                renderApiStatus: "timeout",
+                renderApiMessage:
+                  "L'API Render a mis trop de temps à répondre. Utilisation du mode démo avec données simulées.",
+              },
+              { status: 408 },
+            ) // 408 Request Timeout
           }
 
           diagnostics.push(
@@ -286,11 +290,20 @@ export async function POST(req: NextRequest) {
           console.log("API - Utilisation des données simulées en fallback")
           // Continuer avec le mode de secours
         }
+      } catch (error: any) {
+        diagnostics.push(
+          `Erreur lors de l'appel à l'API Render: ${error instanceof Error ? error.message : String(error)}`,
+        )
+        console.error("API - Erreur lors de l'appel à l'API Render:", error)
+        diagnostics.push("Utilisation des données simulées en fallback")
+        console.log("API - Utilisation des données simulées en fallback")
+        // Continuer avec le mode de secours
       }
+    }
 
     // Si l'API Render n'est pas disponible ou si une erreur s'est produite, utiliser les données simulées
-    const { commissionId, startDate, extractDetails = true, credentials } = requestData;
-\
+    const { commissionId, startDate, extractDetails = true, credentials } = requestData
+
     // Vérifier que les identifiants chiffrés sont fournis
     if (!credentials || !credentials.encryptedUsername || !credentials.encryptedPassword) {
       diagnostics.push("Identifiants chiffrés manquants")
