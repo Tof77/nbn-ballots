@@ -79,7 +79,7 @@ async function warmupRenderApi(queryParams = ""): Promise<WarmupResult> {
     let data
     try {
       data = JSON.parse(responseText)
-    } catch (jsonError) {
+    } catch (jsonError: unknown) {
       console.error("Erreur lors du parsing de la réponse JSON:", jsonError)
       console.log("Réponse brute:", responseText.substring(0, 200))
       return {
@@ -112,7 +112,7 @@ async function warmupRenderApi(queryParams = ""): Promise<WarmupResult> {
       statusCode: data.status || response.status,
       errorDetails: data.error || data.details || null,
     }
-  } catch (error) {
+  } catch (error: unknown) {
     console.error("Erreur lors du réchauffement:", error)
     return {
       success: false,
@@ -217,7 +217,7 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
         } else {
           setError("Impossible de charger la clé publique pour le chiffrement")
         }
-      } catch (err) {
+      } catch (err: unknown) {
         setError("Erreur lors de la vérification de la clé publique")
       }
     }
@@ -282,7 +282,7 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
         lastChecked: new Date(),
         statusCode: result.statusCode || 0,
       })
-    } catch (error) {
+    } catch (error: unknown) {
       setRenderApiStatus({
         status: "error",
         message: error instanceof Error ? error.message : String(error),
@@ -382,7 +382,7 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
         const testText = await testResponse.text()
         console.log("Test API response:", testText)
         setDebugInfo((prev) => `${prev}\n\nTest API response: ${testText}`)
-      } catch (testError) {
+      } catch (testError: unknown) {
         console.error("Erreur lors du test de l'API:", testError)
         setDebugInfo((prev) => `${prev}\n\nErreur lors du test de l'API: ${testError}`)
       }
@@ -432,7 +432,7 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
             console.log("Mode démonstration activé")
             setDebugInfo((prev) => `${prev}\n\nMode démonstration activé - Utilisation de données simulées`)
           }
-        } catch (parseError) {
+        } catch (parseError: unknown) {
           console.error("Erreur lors du parsing de la réponse JSON:", parseError)
           setDebugInfo(
             (prev) =>
@@ -455,9 +455,14 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
 
         // Effacer le mot de passe après utilisation pour plus de sécurité
         setPassword("")
-      } catch (error) {
+      } catch (error: unknown) {
         // Vérifier si c'est une erreur de timeout
-        if (error.name === "AbortError" || error.name === "TimeoutError") {
+        if (
+          error &&
+          typeof error === "object" &&
+          "name" in error &&
+          (error.name === "AbortError" || error.name === "TimeoutError")
+        ) {
           setDebugInfo((prev) => `${prev}\n\nL'opération a expiré (timeout). L'extraction prend trop de temps.`)
           setError(
             "L'opération a expiré. L'extraction des votes prend trop de temps. Essayez de réduire la plage de dates ou de désactiver l'extraction des détails des votes.",
@@ -468,8 +473,11 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
           onResultsReceived([], true)
         } else {
           // Autres erreurs
-          setDebugInfo((prev) => `${prev}\n\nErreur lors de l'extraction: ${error.message || String(error)}`)
-          setError(error.message || "Une erreur est survenue")
+          setDebugInfo(
+            (prev) =>
+              `${prev}\n\nErreur lors de l'extraction: ${error instanceof Error ? error.message : String(error)}`,
+          )
+          setError(error instanceof Error ? error.message : String(error) || "Une erreur est survenue")
           onResultsReceived([])
         }
 
@@ -883,7 +891,7 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
                   (prev) =>
                     `${prev}\n\nRéchauffement manuel: ${result.success ? "Succès" : "Échec"} - ${result.message}`,
                 )
-              } catch (error) {
+              } catch (error: unknown) {
                 setDebugInfo(
                   (prev) =>
                     `${prev}\n\nErreur lors du réchauffement: ${error instanceof Error ? error.message : String(error)}`,
