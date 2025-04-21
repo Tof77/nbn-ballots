@@ -109,7 +109,10 @@ async function capturePageHtml(page, htmlPath) {
     console.log(`Capture d'écran enregistrée dans ${screenshotPath}`)
 
     // Générer l'URL de la capture d'écran
-    const baseUrl = process.env.RENDER_BASE_URL || `http://localhost:${port}`
+    const baseUrl =
+      process.env.RENDER_BASE_URL ||
+      process.env.RENDER_SERVICE_URL ||
+      `https://${process.env.RENDER_SERVICE_NAME || "nbn-ballots-api"}.onrender.com`
     const screenshotUrl = `${baseUrl}/public/screenshots/${filename}`
 
     // Stocker l'URL dans un objet global pour l'inclure dans la réponse
@@ -270,7 +273,10 @@ app.post("/api/extract-votes", async (req, res) => {
       await page.screenshot({ path: initialScreenshotPath, fullPage: true })
 
       // Générer l'URL de la capture d'écran
-      const baseUrl = process.env.RENDER_BASE_URL || `http://localhost:${port}`
+      const baseUrl =
+        process.env.RENDER_BASE_URL ||
+        process.env.RENDER_SERVICE_URL ||
+        `https://${process.env.RENDER_SERVICE_NAME || "nbn-ballots-api"}.onrender.com`
       const initialScreenshotUrl = `${baseUrl}/public/screenshots/${path.basename(initialScreenshotPath)}`
       screenshotUrls.push({ name: "Page initiale", url: initialScreenshotUrl })
       console.log(`Capture d'écran initiale: ${initialScreenshotUrl}`)
