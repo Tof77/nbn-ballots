@@ -2,8 +2,8 @@ import { type NextRequest, NextResponse } from "next/server"
 
 // Définir le runtime Node.js pour cette route API
 export const runtime = "nodejs"
-// Augmenter la durée maximale d'exécution à 120 secondes
-export const maxDuration = 120
+// Augmenter la durée maximale d'exécution à 300 secondes (5 minutes)
+export const maxDuration = 300
 
 // Définir les interfaces pour les types de données
 interface VoteDetail {
@@ -34,6 +34,19 @@ interface ScreenshotInfo {
   url: string
 }
 
+interface ExtractionStatus {
+  id: string
+  status: "pending" | "in-progress" | "completed" | "failed"
+  progress?: number
+  message?: string
+  startTime: number
+  endTime?: number
+  result?: any
+}
+
+// Map pour stocker l'état des extractions en cours
+const extractionStatusMap = new Map<string, ExtractionStatus>()
+
 // Fonction pour déchiffrer les données simulées
 function simulateDecryption(encryptedData: string): string {
   try {
@@ -61,9 +74,43 @@ function extractCommissionCode(commissionId: string): string {
   return "Unknown"
 }
 
+// Fonction pour générer un ID unique pour l'extraction
+function generateExtractionId(): string {
+  return `extract-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
+}
+
+// Fonction pour vérifier l'état d'une extraction
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url)
+  const extractionId = searchParams.get("id")
+
+  if (!extractionId) {
+    return NextResponse.json(
+      {
+        error: "ID d'extraction manquant",
+      },
+      { status: 400 },
+    )
+  }
+
+  const extractionStatus = extractionStatusMap.get(extractionId)
+  if (!extractionStatus) {
+    return NextResponse.json(
+      {
+        error: "Extraction non trouvée",
+      },
+      { status: 404 },
+    )
+  }
+
+  return NextResponse.json(extractionStatus)
+}
+
+// Fonction pour démarrer une nouvelle extraction
 export async function POST(req: NextRequest) {
   const diagnostics: string[] = []
   const startTime = Date.now()
+  let extractionId: string // Déclaration de la variable extractionId
 
   try {
     // Récupérer et journaliser les données brutes
@@ -96,6 +143,20 @@ export async function POST(req: NextRequest) {
       console.log("API - Mode démo forcé par l'utilisateur")
     }
 
+    // Vérifier si c'est une demande de statut d'extraction
+    if (requestData.checkExtractionStatus && requestData.extractionId) {
+      const extractionStatus = extractionStatusMap.get(requestData.extractionId)
+      if (!extractionStatus) {
+        return NextResponse.json(
+          {
+            error: "Extraction non trouvée",
+          },
+          { status: 404 },
+        )
+      }
+      return NextResponse.json(extractionStatus)
+    }
+
     // Journaliser les données reçues (sans les identifiants sensibles)
     const sanitizedData = {
       ...requestData,
@@ -114,239 +175,372 @@ export async function POST(req: NextRequest) {
     diagnostics.push(`RENDER_API_URL: ${renderApiUrl || "non définie"}`)
     console.log("API - RENDER_API_URL:", renderApiUrl)
 
+    // Générer un ID unique pour cette extraction
+    extractionId = generateExtractionId()
+
+    // Créer une entrée dans la map pour suivre l'état de l'extraction
+    extractionStatusMap.set(extractionId, {
+      id: extractionId,
+      status: "pending",
+      message: "Extraction en attente de démarrage",
+      startTime: Date.now(),
+    })
+
     // Vérifier si l'API Render est configurée et si le mode démo n'est pas forcé
     if (!renderApiUrl || forceDemoMode) {
       if (!renderApiUrl) {
         diagnostics.push("RENDER_API_URL non définie, utilisation des données simulées")
         console.log("API - RENDER_API_URL non définie, utilisation des données simulées")
       }
-      // Continuer avec le mode de secours
+
+      // Mettre à jour le statut pour indiquer que nous utilisons le mode démo
+      extractionStatusMap.set(extractionId, {
+        ...extractionStatusMap.get(extractionId)!,
+        status: "completed",
+        message: "Extraction terminée en mode démo",
+        endTime: Date.now(),
+        result: {
+          demoMode: true,
+          // Nous ajouterons les données simulées ici
+        },
+      })
+
+      // Continuer avec le mode de secours (données simulées)
+      // ...
     } else {
-      try {
-        diagnostics.push(`Tentative d'appel à l'API Render: ${renderApiUrl}/api/extract-votes`)
-        console.log("API - Tentative d'appel à l'API Render:", `${renderApiUrl}/api/extract-votes`)
-
-        // Tester d'abord si l'API Render est accessible
-        try {
-          diagnostics.push("Ping de l'API Render...")
-          const pingStartTime = Date.now()
-          const pingResponse = await fetch(`${renderApiUrl}/ping?cache=${Date.now()}`, {
-            method: "GET",
-            headers: {
-              Accept: "application/json",
-              "Cache-Control": "no-cache, no-store, must-revalidate",
-              Pragma: "no-cache",
-              Expires: "0",
-            },
-            // Ajouter un timeout pour éviter d'attendre trop longtemps
-            signal: AbortSignal.timeout(15000), // 15 secondes
-          })
-          const pingDuration = Date.now() - pingStartTime
-          diagnostics.push(`Ping Render status: ${pingResponse.status} (${pingDuration}ms)`)
-          console.log("API - Ping Render status:", pingResponse.status, `(${pingDuration}ms)`)
-
-          // Essayer de lire le corps de la réponse pour plus d'informations
+      // Mettre à jour le statut pour indiquer que l'extraction a commencé
+      extractionStatusMap.set(extractionId, {
+        ...extractionStatusMap.get(extractionId)!,
+        status: "in-progress",
+        message: "Extraction en cours sur l'API Render",
+      })(
+        // Lancer l'extraction en arrière-plan sans attendre la réponse
+        async () => {
           try {
-            const pingText = await pingResponse.text()
-            diagnostics.push(`Ping Render response: ${pingText.substring(0, 200)}${pingText.length > 200 ? "..." : ""}`)
-          } catch (pingBodyError: any) {
+            diagnostics.push(`Tentative d'appel à l'API Render: ${renderApiUrl}/api/extract-votes`)
+            console.log("API - Tentative d'appel à l'API Render:", `${renderApiUrl}/api/extract-votes`)
+
+            // Tester d'abord si l'API Render est accessible
+            try {
+              diagnostics.push("Ping de l'API Render...")
+              const pingStartTime = Date.now()
+              const pingResponse = await fetch(`${renderApiUrl}/ping?cache=${Date.now()}`, {
+                method: "GET",
+                headers: {
+                  Accept: "application/json",
+                  "Cache-Control": "no-cache, no-store, must-revalidate",
+                  Pragma: "no-cache",
+                  Expires: "0",
+                },
+                // Ajouter un timeout pour éviter d'attendre trop longtemps
+                signal: AbortSignal.timeout(15000), // 15 secondes
+              })
+              const pingDuration = Date.now() - pingStartTime
+
+              // Mettre à jour le statut avec les informations du ping
+              extractionStatusMap.set(extractionId, {
+                ...extractionStatusMap.get(extractionId)!,
+                message: `Ping de l'API Render: ${pingResponse.status} (${pingDuration}ms)`,
+              })
+
+              diagnostics.push(`Ping Render status: ${pingResponse.status} (${pingDuration}ms)`)
+              console.log("API - Ping Render status:", pingResponse.status, `(${pingDuration}ms)`)
+
+              // Essayer de lire le corps de la réponse pour plus d'informations
+              try {
+                const pingText = await pingResponse.text()
+                diagnostics.push(
+                  `Ping Render response: ${pingText.substring(0, 200)}${pingText.length > 200 ? "..." : ""}`,
+                )
+              } catch (pingBodyError: any) {
+                diagnostics.push(
+                  `Erreur lors de la lecture du corps du ping: ${pingBodyError instanceof Error ? pingBodyError.message : String(pingBodyError)}`,
+                )
+              }
+
+              // Vérifier si le service est en maintenance (503)
+              if (pingResponse.status === 503) {
+                diagnostics.push("L'API Render est en maintenance (503), utilisation des données simulées")
+                console.log("API - L'API Render est en maintenance (503), utilisation des données simulées")
+                throw new Error("L'API Render est en maintenance (503)")
+              }
+
+              if (!pingResponse.ok) {
+                diagnostics.push(
+                  `L'API Render n'est pas accessible (status ${pingResponse.status}), utilisation des données simulées`,
+                )
+                console.log("API - L'API Render n'est pas accessible, utilisation des données simulées")
+                throw new Error(`L'API Render n'est pas accessible (status ${pingResponse.status})`)
+              }
+            } catch (pingError: any) {
+              // Mettre à jour le statut avec l'erreur de ping
+              extractionStatusMap.set(extractionId, {
+                ...extractionStatusMap.get(extractionId)!,
+                status: "failed",
+                message: `Erreur lors du ping de l'API Render: ${pingError instanceof Error ? pingError.message : String(pingError)}`,
+                endTime: Date.now(),
+              })
+
+              diagnostics.push(
+                `Erreur lors du ping de l'API Render: ${pingError instanceof Error ? pingError.message : String(pingError)}`,
+              )
+              console.error("API - Erreur lors du ping de l'API Render:", pingError)
+              throw new Error(
+                `Erreur lors du ping de l'API Render: ${pingError instanceof Error ? pingError.message : String(pingError)}`,
+              )
+            }
+
+            // Ajouter une note concernant la possibilité d'une fenêtre GDPR
             diagnostics.push(
-              `Erreur lors de la lecture du corps du ping: ${pingBodyError instanceof Error ? pingBodyError.message : String(pingBodyError)}`,
+              "Note: Si l'API ne répond pas, il est possible qu'une fenêtre de confirmation GDPR soit affichée sur le serveur Render.",
             )
-          }
 
-          // Vérifier si le service est en maintenance (503)
-          if (pingResponse.status === 503) {
-            diagnostics.push("L'API Render est en maintenance (503), utilisation des données simulées")
-            console.log("API - L'API Render est en maintenance (503), utilisation des données simulées")
-            throw new Error("L'API Render est en maintenance (503)")
-          }
+            // Appeler l'API Render avec un timeout plus long pour l'opération principale
+            diagnostics.push("Appel à l'API Render pour l'extraction des votes...")
+            const extractStartTime = Date.now()
 
-          if (!pingResponse.ok) {
-            diagnostics.push(
-              `L'API Render n'est pas accessible (status ${pingResponse.status}), utilisation des données simulées`,
-            )
-            console.log("API - L'API Render n'est pas accessible, utilisation des données simulées")
-            throw new Error(`L'API Render n'est pas accessible (status ${pingResponse.status})`)
-          }
-        } catch (pingError: any) {
-          diagnostics.push(
-            `Erreur lors du ping de l'API Render: ${pingError instanceof Error ? pingError.message : String(pingError)}`,
-          )
-          console.error("API - Erreur lors du ping de l'API Render:", pingError)
-          throw new Error(
-            `Erreur lors du ping de l'API Render: ${pingError instanceof Error ? pingError.message : String(pingError)}`,
-          )
-        }
+            // Mettre à jour le statut pour indiquer que l'extraction a commencé
+            extractionStatusMap.set(extractionId, {
+              ...extractionStatusMap.get(extractionId)!,
+              message: "Extraction des votes en cours...",
+              progress: 10,
+            })
 
-        // Ajouter une note concernant la possibilité d'une fenêtre GDPR
-        diagnostics.push(
-          "Note: Si l'API ne répond pas, il est possible qu'une fenêtre de confirmation GDPR soit affichée sur le serveur Render.",
-        )
+            try {
+              // Ajouter un timeout beaucoup plus long pour l'extraction
+              const controller = new AbortController()
+              const timeoutId = setTimeout(() => {
+                diagnostics.push("Timeout manuel déclenché après 240 secondes")
+                controller.abort(new Error("Timeout manuel après 240 secondes"))
+              }, 240000) // 4 minutes
 
-        // Appeler l'API Render avec un timeout plus long pour l'opération principale
-        diagnostics.push("Appel à l'API Render pour l'extraction des votes...")
-        const extractStartTime = Date.now()
-        try {
-          // Ajouter un timeout plus long pour l'extraction
-          const controller = new AbortController()
-          const timeoutId = setTimeout(() => {
-            diagnostics.push("Timeout manuel déclenché après 60 secondes")
-            controller.abort(new Error("Timeout manuel après 60 secondes"))
-          }, 60000) // 60 secondes
+              // Ajouter un paramètre de cache-buster pour éviter les réponses en cache
+              const timestamp = Date.now()
+              const urlWithCacheBuster = `${renderApiUrl}/api/extract-votes?cache=${timestamp}`
 
-          // Ajouter un paramètre de cache-buster pour éviter les réponses en cache
-          const timestamp = Date.now()
-          const urlWithCacheBuster = `${renderApiUrl}/api/extract-votes?cache=${timestamp}`
+              // Mettre à jour le statut pour indiquer que la requête a été envoyée
+              extractionStatusMap.set(extractionId, {
+                ...extractionStatusMap.get(extractionId)!,
+                message: "Requête envoyée à l'API Render, en attente de réponse...",
+                progress: 20,
+              })
 
-          const response = await fetch(urlWithCacheBuster, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Cache-Control": "no-cache, no-store, must-revalidate",
-              Pragma: "no-cache",
-              Expires: "0",
-            },
-            body: JSON.stringify({
-              ...requestData,
-              // Ajouter un paramètre pour indiquer que c'est une requête depuis Vercel
-              fromVercel: true,
-              vercelTimestamp: timestamp,
-            }),
-            signal: controller.signal,
-          })
+              const response = await fetch(urlWithCacheBuster, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "Cache-Control": "no-cache, no-store, must-revalidate",
+                  Pragma: "no-cache",
+                  Expires: "0",
+                },
+                body: JSON.stringify({
+                  ...requestData,
+                  // Ajouter un paramètre pour indiquer que c'est une requête depuis Vercel
+                  fromVercel: true,
+                  vercelTimestamp: timestamp,
+                  extractionId: extractionId,
+                }),
+                signal: controller.signal,
+              })
 
-          // Nettoyer le timeout
-          clearTimeout(timeoutId)
+              // Nettoyer le timeout
+              clearTimeout(timeoutId)
 
-          const extractDuration = Date.now() - extractStartTime
-          diagnostics.push(
-            `Statut de la réponse Render: ${response.status} ${response.statusText} (${extractDuration}ms)`,
-          )
-          console.log(
-            "API - Statut de la réponse Render:",
-            response.status,
-            response.statusText,
-            `(${extractDuration}ms)`,
-          )
+              const extractDuration = Date.now() - extractStartTime
 
-          // Vérifier si le service est en maintenance (503)
-          if (response.status === 503) {
-            diagnostics.push("L'API Render est en maintenance (503), utilisation des données simulées")
-            console.log("API - L'API Render est en maintenance (503), utilisation des données simulées")
-            throw new Error("L'API Render est en maintenance (503)")
-          }
+              // Mettre à jour le statut avec les informations de la réponse
+              extractionStatusMap.set(extractionId, {
+                ...extractionStatusMap.get(extractionId)!,
+                message: `Réponse reçue: ${response.status} ${response.statusText} (${extractDuration}ms)`,
+                progress: 80,
+              })
 
-          // Récupérer la réponse avec un timeout pour la lecture du corps
-          const responseTextPromise = response.text()
-          const responseTextTimeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error("Timeout lors de la lecture du corps de la réponse")), 10000)
-          })
+              diagnostics.push(
+                `Statut de la réponse Render: ${response.status} ${response.statusText} (${extractDuration}ms)`,
+              )
+              console.log(
+                "API - Statut de la réponse Render:",
+                response.status,
+                response.statusText,
+                `(${extractDuration}ms)`,
+              )
 
-          const responseText = (await Promise.race([responseTextPromise, responseTextTimeoutPromise])) as string
+              // Vérifier si le service est en maintenance (503)
+              if (response.status === 503) {
+                // Mettre à jour le statut avec l'erreur de maintenance
+                extractionStatusMap.set(extractionId, {
+                  ...extractionStatusMap.get(extractionId)!,
+                  status: "failed",
+                  message: "L'API Render est en maintenance (503)",
+                  endTime: Date.now(),
+                })
 
-          diagnostics.push(`Longueur de la réponse Render: ${responseText.length}`)
-          console.log("API - Longueur de la réponse Render:", responseText.length)
+                diagnostics.push("L'API Render est en maintenance (503), utilisation des données simulées")
+                console.log("API - L'API Render est en maintenance (503), utilisation des données simulées")
+                throw new Error("L'API Render est en maintenance (503)")
+              }
 
-          let responseData: any
-          try {
-            responseData = JSON.parse(responseText)
+              // Récupérer la réponse avec un timeout pour la lecture du corps
+              const responseTextPromise = response.text()
+              const responseTextTimeoutPromise = new Promise((_, reject) => {
+                setTimeout(() => reject(new Error("Timeout lors de la lecture du corps de la réponse")), 30000)
+              })
+
+              // Mettre à jour le statut pour indiquer que nous lisons la réponse
+              extractionStatusMap.set(extractionId, {
+                ...extractionStatusMap.get(extractionId)!,
+                message: "Lecture de la réponse...",
+                progress: 90,
+              })
+
+              const responseText = (await Promise.race([responseTextPromise, responseTextTimeoutPromise])) as string
+
+              diagnostics.push(`Longueur de la réponse Render: ${responseText.length}`)
+              console.log("API - Longueur de la réponse Render:", responseText.length)
+
+              let responseData: any
+              try {
+                responseData = JSON.parse(responseText)
+
+                // Mettre à jour le statut avec les données extraites
+                extractionStatusMap.set(extractionId, {
+                  ...extractionStatusMap.get(extractionId)!,
+                  status: "completed",
+                  message: "Extraction terminée avec succès",
+                  progress: 100,
+                  endTime: Date.now(),
+                  result: responseData,
+                })
+              } catch (error: any) {
+                // Mettre à jour le statut avec l'erreur de parsing
+                extractionStatusMap.set(extractionId, {
+                  ...extractionStatusMap.get(extractionId)!,
+                  status: "failed",
+                  message: `Erreur lors du parsing de la réponse JSON: ${error instanceof Error ? error.message : String(error)}`,
+                  endTime: Date.now(),
+                })
+
+                diagnostics.push(
+                  `Erreur lors du parsing de la réponse JSON: ${error instanceof Error ? error.message : String(error)}`,
+                )
+                diagnostics.push(`Début de la réponse: ${responseText.substring(0, 500)}...`)
+                console.error("API - Erreur lors du parsing de la réponse JSON:", error)
+                throw new Error("Format de réponse invalide")
+              }
+
+              if (!response.ok) {
+                // Mettre à jour le statut avec l'erreur de l'API
+                extractionStatusMap.set(extractionId, {
+                  ...extractionStatusMap.get(extractionId)!,
+                  status: "failed",
+                  message: `Erreur de l'API Render: ${responseData.error || `Statut HTTP: ${response.status}`}`,
+                  endTime: Date.now(),
+                })
+
+                diagnostics.push(`Erreur de l'API Render: ${JSON.stringify(responseData, null, 2)}`)
+                console.error("API - Erreur de l'API Render:", responseData)
+                throw new Error(`Erreur de l'API Render: ${responseData.error || `Statut HTTP: ${response.status}`}`)
+              }
+
+              diagnostics.push("Réponse de l'API Render reçue avec succès")
+              console.log("API - Réponse de l'API Render reçue avec succès")
+
+              // Ajouter les diagnostics à la réponse
+              if (!responseData.diagnostics) {
+                responseData.diagnostics = diagnostics
+              } else {
+                responseData.diagnostics = [
+                  ...diagnostics,
+                  "--- Diagnostics de l'API Render ---",
+                  ...responseData.diagnostics,
+                ]
+              }
+
+              // Vérifier si la réponse contient des URLs de captures d'écran
+              if (responseData.debug?.screenshotUrls) {
+                diagnostics.push(`${responseData.debug.screenshotUrls.length} captures d'écran disponibles`)
+                console.log(`API - ${responseData.debug.screenshotUrls.length} captures d'écran disponibles`)
+              }
+
+              // Mettre à jour le statut final avec toutes les informations
+              extractionStatusMap.set(extractionId, {
+                ...extractionStatusMap.get(extractionId)!,
+                status: "completed",
+                message: "Extraction terminée avec succès",
+                progress: 100,
+                endTime: Date.now(),
+                result: responseData,
+              })
+            } catch (error: any) {
+              // Vérifier si c'est une erreur de timeout ou d'abandon
+              const isTimeoutError =
+                error.name === "AbortError" ||
+                error.name === "TimeoutError" ||
+                error.message.includes("aborted") ||
+                error.message.includes("timeout") ||
+                error.message.includes("Timeout")
+
+              if (isTimeoutError) {
+                // Mettre à jour le statut avec l'erreur de timeout
+                extractionStatusMap.set(extractionId, {
+                  ...extractionStatusMap.get(extractionId)!,
+                  status: "failed",
+                  message: "L'opération a expiré (timeout). L'extraction prend trop de temps.",
+                  endTime: Date.now(),
+                })
+
+                diagnostics.push("L'opération a expiré (timeout). L'extraction prend trop de temps.")
+                console.error("API - Timeout lors de l'appel à l'API Render:", error)
+              } else {
+                // Mettre à jour le statut avec l'erreur générale
+                extractionStatusMap.set(extractionId, {
+                  ...extractionStatusMap.get(extractionId)!,
+                  status: "failed",
+                  message: `Erreur lors de l'appel à l'API Render: ${error instanceof Error ? error.message : String(error)}`,
+                  endTime: Date.now(),
+                })
+
+                diagnostics.push(
+                  `Erreur lors de l'appel à l'API Render: ${error instanceof Error ? error.message : String(error)}`,
+                )
+                console.error("API - Erreur lors de l'appel à l'API Render:", error)
+              }
+
+              // Générer des données simulées en cas d'échec
+              // ...
+            }
           } catch (error: any) {
-            diagnostics.push(
-              `Erreur lors du parsing de la réponse JSON: ${error instanceof Error ? error.message : String(error)}`,
-            )
-            diagnostics.push(`Début de la réponse: ${responseText.substring(0, 500)}...`)
-            console.error("API - Erreur lors du parsing de la réponse JSON:", error)
-            return NextResponse.json(
-              {
-                error: "Format de réponse invalide",
-                details: "La réponse de l'API externe n'est pas un JSON valide",
-                receivedResponse: responseText.substring(0, 500) + "...", // Afficher les 500 premiers caractères
-                diagnostics,
-                renderApiUrl,
-              },
-              { status: 502 },
-            )
-          }
+            // Mettre à jour le statut avec l'erreur générale
+            extractionStatusMap.set(extractionId, {
+              ...extractionStatusMap.get(extractionId)!,
+              status: "failed",
+              message: `Erreur lors de l'extraction: ${error instanceof Error ? error.message : String(error)}`,
+              endTime: Date.now(),
+            })
 
-          if (!response.ok) {
-            diagnostics.push(`Erreur de l'API Render: ${JSON.stringify(responseData, null, 2)}`)
-            console.error("API - Erreur de l'API Render:", responseData)
-            return NextResponse.json(
-              {
-                error: "Erreur de l'API Render",
-                details: responseData.error || `Statut HTTP: ${response.status}`,
-                renderApiUrl,
-                diagnostics,
-                responseData,
-              },
-              { status: 502 },
-            )
-          }
-
-          diagnostics.push("Réponse de l'API Render reçue avec succès")
-          console.log("API - Réponse de l'API Render reçue avec succès")
-
-          // Ajouter les diagnostics à la réponse
-          if (!responseData.diagnostics) {
-            responseData.diagnostics = diagnostics
-          } else {
-            responseData.diagnostics = [
-              ...diagnostics,
-              "--- Diagnostics de l'API Render ---",
-              ...responseData.diagnostics,
-            ]
-          }
-
-          // Vérifier si la réponse contient des URLs de captures d'écran
-          if (responseData.debug?.screenshotUrls) {
-            diagnostics.push(`${responseData.debug.screenshotUrls.length} captures d'écran disponibles`)
-            console.log(`API - ${responseData.debug.screenshotUrls.length} captures d'écran disponibles`)
-          }
-
-          return NextResponse.json(responseData)
-        } catch (error: any) {
-          // Vérifier si c'est une erreur de timeout ou d'abandon
-          const isTimeoutError =
-            error.name === "AbortError" ||
-            error.name === "TimeoutError" ||
-            error.message.includes("aborted") ||
-            error.message.includes("timeout") ||
-            error.message.includes("Timeout")
-
-          if (isTimeoutError) {
-            diagnostics.push("L'opération a expiré (timeout). L'extraction prend trop de temps.")
-            console.error("API - Timeout lors de l'appel à l'API Render:", error)
-
-            // Détection du mode de démonstration suite au timeout
-            diagnostics.push(
-              `Détection du mode de démonstration suite à l'erreur: ${error instanceof Error ? error.message : String(error)}`,
-            )
-            diagnostics.push("Activation du mode de démonstration avec données simulées")
-            console.log("API - Activation du mode de démonstration avec données simulées suite au timeout")
-            // Continuer avec le mode de secours
-          } else {
             diagnostics.push(
               `Erreur lors de l'appel à l'API Render: ${error instanceof Error ? error.message : String(error)}`,
             )
             console.error("API - Erreur lors de l'appel à l'API Render:", error)
-            diagnostics.push("Utilisation des données simulées en fallback")
-            console.log("API - Utilisation des données simulées en fallback")
-            // Continuer avec le mode de secours
+
+            // Générer des données simulées en cas d'échec
+            // ...
           }
-        }
-      } catch (error: any) {
-        diagnostics.push(
-          `Erreur lors de l'appel à l'API Render: ${error instanceof Error ? error.message : String(error)}`,
-        )
-        console.error("API - Erreur lors de l'appel à l'API Render:", error)
-        diagnostics.push("Utilisation des données simulées en fallback")
-        console.log("API - Utilisation des données simulées en fallback")
-        // Continuer avec le mode de secours
-      }
+        },
+      )()
+
+      // Retourner immédiatement l'ID d'extraction pour que le client puisse vérifier l'état plus tard
+      return NextResponse.json({
+        extractionId,
+        status: "in-progress",
+        message: "Extraction démarrée, vérifiez l'état avec l'ID d'extraction",
+      })
     }
 
-    // Si l'API Render n'est pas disponible ou si une erreur s'est produite, utiliser les données simulées
+    // Si nous sommes ici, c'est que nous utilisons le mode démo
+    // Générer des données simulées comme avant
+    // ...
+
     const { commissionId, startDate, extractDetails = true, credentials } = requestData
 
     // Vérifier que les identifiants chiffrés sont fournis
@@ -661,7 +855,7 @@ export async function POST(req: NextRequest) {
     const totalDuration = Date.now() - startTime
     diagnostics.push(`Durée totale de traitement: ${totalDuration}ms`)
 
-    return NextResponse.json({
+    const simulatedResponse = {
       votes,
       debug: {
         receivedCommissionId: commissionId,
@@ -676,12 +870,32 @@ export async function POST(req: NextRequest) {
       diagnostics,
       renderApiStatus: "unavailable",
       renderApiMessage: "L'API Render n'est pas disponible. Utilisation du mode démonstration avec données simulées.",
+    }
+
+    // Mettre à jour le statut avec les données simulées
+    extractionStatusMap.set(extractionId, {
+      ...extractionStatusMap.get(extractionId)!,
+      status: "completed",
+      message: "Extraction terminée en mode démo",
+      endTime: Date.now(),
+      result: simulatedResponse,
     })
+
+    return NextResponse.json(simulatedResponse)
   } catch (error: any) {
     const totalDuration = Date.now() - startTime
     diagnostics.push(`Durée totale jusqu'à l'erreur: ${totalDuration}ms`)
     diagnostics.push(`Erreur générale: ${error instanceof Error ? error.message : String(error)}`)
     console.error("API - Erreur générale:", error)
+
+    // Mettre à jour le statut avec l'erreur
+    extractionStatusMap.set(extractionId, {
+      ...extractionStatusMap.get(extractionId)!,
+      status: "failed",
+      message: `Erreur lors de l'extraction des votes: ${error instanceof Error ? error.message : String(error)}`,
+      endTime: Date.now(),
+    })
+
     return NextResponse.json(
       {
         error: "Erreur lors de l'extraction des votes",
