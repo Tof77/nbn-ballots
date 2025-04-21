@@ -173,6 +173,43 @@ async function enhancedQuerySelector(page, selector, textContent) {
   )
 }
 
+// Ajouter une fonction pour envoyer des mises à jour de progression
+async function updateExtractionProgress(extractionId, status, message, progress) {
+  if (!extractionId) return
+
+  try {
+    // Vérifier si nous avons une URL de callback
+    const callbackUrl = process.env.VERCEL_CALLBACK_URL || process.env.RENDER_CALLBACK_URL
+    if (!callbackUrl) {
+      console.log("Pas d'URL de callback définie pour les mises à jour de progression")
+      return
+    }
+
+    // Envoyer la mise à jour
+    const response = await fetch(`${callbackUrl}/api/extraction-progress`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        extractionId,
+        status,
+        message,
+        progress,
+        timestamp: Date.now(),
+      }),
+    })
+
+    if (!response.ok) {
+      console.error(
+        `Erreur lors de l'envoi de la mise à jour de progression: ${response.status} ${response.statusText}`,
+      )
+    }
+  } catch (error) {
+    console.error("Erreur lors de l'envoi de la mise à jour de progression:", error)
+  }
+}
+
 // Route principale pour l'extraction des votes
 app.post("/api/extract-votes", async (req, res) => {
   console.log("Requête d'extraction reçue")
@@ -183,7 +220,7 @@ app.post("/api/extract-votes", async (req, res) => {
   const sessionId = Date.now().toString()
 
   try {
-    const { commissionId, startDate, extractDetails = true, credentials } = req.body
+    const { commissionId, startDate, extractDetails = true, credentials, extractionId } = req.body
 
     // Vérifier que les identifiants chiffrés sont fournis
     if (!credentials || !credentials.encryptedUsername || !credentials.encryptedPassword) {
@@ -416,6 +453,8 @@ app.post("/api/extract-votes", async (req, res) => {
       }
 
       console.log("Connexion réussie!")
+      // Après la connexion:
+      await updateExtractionProgress(extractionId, "in-progress", "Connexion réussie", 30)
 
       // Naviguer directement vers la page de recherche des votes
       console.log("Navigation vers la page de recherche des votes...")
@@ -476,6 +515,8 @@ app.post("/api/extract-votes", async (req, res) => {
         return "Titre inconnu"
       })
       console.log(`Titre de la page: ${pageTitle}`)
+      // Après la navigation vers la page de recherche:
+      await updateExtractionProgress(extractionId, "in-progress", "Navigation vers la page de recherche", 40)
 
       // Capturer l'état de la page avant la sélection de la commission
       const beforeCommitteeSelectionPath = path.join(screenshotsDir, `${sessionId}-before-committee-selection.png`)
@@ -507,6 +548,8 @@ app.post("/api/extract-votes", async (req, res) => {
         await page.screenshot({ path: afterCommitteeSelectionPath, fullPage: true })
         const afterCommitteeSelectionUrl = `${baseUrl}/public/screenshots/${path.basename(afterCommitteeSelectionPath)}`
         screenshotUrls.push({ name: "Après sélection de commission", url: afterCommitteeSelectionUrl })
+        // Après la sélection de la commission:
+        await updateExtractionProgress(extractionId, "in-progress", "Commission sélectionnée", 50)
 
         // Définir la date si demandé
         if (startDate) {
@@ -570,6 +613,8 @@ app.post("/api/extract-votes", async (req, res) => {
 
         // Attendre que la recherche soit terminée
         await delay(15000) // Attendre 15 secondes pour que les résultats se chargent
+        // Après la recherche:
+        await updateExtractionProgress(extractionId, "in-progress", "Recherche effectuée", 60)
 
         // Prendre une capture d'écran des résultats
         const searchResultsPath = path.join(screenshotsDir, `${sessionId}-search-results.png`)
@@ -685,6 +730,7 @@ app.post("/api/extract-votes", async (req, res) => {
 
           const startTime = Date.now()
           const MAX_EXTRACTION_TIME = 45000 // 45 secondes maximum pour l'extraction
+          const totalVotes = votes.length
 
           for (let i = 0; i < votes.length; i++) {
             const vote = votes[i]
@@ -699,6 +745,13 @@ app.post("/api/extract-votes", async (req, res) => {
             // Vérifier si le vote a des détails à extraire et une URL de détails
             if (vote.votes && vote.votes.includes("vote")) {
               console.log(`Extraction des détails pour le vote ${i + 1}/${votes.length}: ${vote.ref}`)
+              // Pendant l'extraction des votes:
+              await updateExtractionProgress(
+                extractionId,
+                "in-progress",
+                `Extraction des votes: ${i + 1}/${totalVotes}`,
+                60 + ((i + 1) / totalVotes) * 30,
+              )
 
               try {
                 // Essayer d'abord d'utiliser l'ID et le type du vote si disponibles
@@ -943,6 +996,8 @@ app.post("/api/extract-votes", async (req, res) => {
         // Fermer le navigateur
         await browser.close()
         browser = null
+        // À la fin de l'extraction:
+        await updateExtractionProgress(extractionId, "completed", "Extraction terminée", 100)
 
         // Retourner les résultats avec les URLs des captures d'écran
         return res.json({
