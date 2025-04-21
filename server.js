@@ -513,8 +513,43 @@ app.post("/api/extract-votes", async (req, res) => {
           console.log(`Définition de la date: ${startDate}`)
           await page
             .evaluate((date) => {
+              // Définir la valeur de la date
               const dateInput = document.querySelector('input[name="searchBeginDateString"]')
               if (dateInput) dateInput.value = date
+
+              // Sélectionner le bouton radio "Closing date" au lieu de "Opening date"
+              const closingDateRadio =
+                document.querySelector('input[name="searchOnOpenDate"][value="false"]') ||
+                document.querySelector("#closeDate")
+              if (closingDateRadio) {
+                closingDateRadio.checked = true
+                // Déclencher l'événement onclick si nécessaire
+                if (closingDateRadio.onclick) {
+                  closingDateRadio.onclick()
+                } else if (typeof changeDateColor === "function") {
+                  try {
+                    changeDateColor(closingDateRadio, "openDate")
+                  } catch (e) {
+                    console.log("Erreur lors de l'appel de changeDateColor:", e.message)
+                  }
+                }
+                console.log("Bouton radio 'Closing date' sélectionné avec succès")
+              } else {
+                console.log("Bouton radio 'Closing date' non trouvé - sélecteur exact non trouvé")
+
+                // Tentative alternative avec des sélecteurs plus génériques
+                const alternativeRadio =
+                  document.querySelector('input[type="radio"][value="false"]') ||
+                  document.querySelector('input[id*="close"]') ||
+                  document.querySelector('input[onclick*="changeDateColor"]')
+
+                if (alternativeRadio) {
+                  alternativeRadio.checked = true
+                  console.log("Bouton radio 'Closing date' sélectionné avec sélecteur alternatif")
+                } else {
+                  console.log("Aucun bouton radio 'Closing date' trouvé après plusieurs tentatives")
+                }
+              }
             }, startDate)
             .catch((e) => {
               console.log(`Erreur lors de la définition de la date: ${e.message}`)
@@ -1148,6 +1183,46 @@ app.post("/api/extract-votes", async (req, res) => {
                 (selector, date) => {
                   const element = document.querySelector(selector)
                   if (element) element.value = date
+
+                  // Sélectionner le bouton radio "Closing date" au lieu de "Opening date"
+                  const closingDateRadio =
+                    document.querySelector('input[name="searchOnOpenDate"][value="false"]') ||
+                    document.querySelector("#closeDate")
+                  if (closingDateRadio) {
+                    closingDateRadio.checked = true
+                    // Déclencher l'événement onclick si nécessaire
+                    if (closingDateRadio.onclick) {
+                      closingDateRadio.onclick()
+                    } else if (typeof changeDateColor === "function") {
+                      try {
+                        changeDateColor(closingDateRadio, "openDate")
+                      } catch (e) {
+                        console.log("Erreur lors de l'appel de changeDateColor:", e.message)
+                      }
+                    }
+                    console.log("Bouton radio 'Closing date' sélectionné avec succès (méthode alternative)")
+                  } else {
+                    console.log(
+                      "Bouton radio 'Closing date' non trouvé - sélecteur exact non trouvé (méthode alternative)",
+                    )
+
+                    // Tentative alternative avec des sélecteurs plus génériques
+                    const alternativeRadio =
+                      document.querySelector('input[type="radio"][value="false"]') ||
+                      document.querySelector('input[id*="close"]') ||
+                      document.querySelector('input[onclick*="changeDateColor"]')
+
+                    if (alternativeRadio) {
+                      alternativeRadio.checked = true
+                      console.log(
+                        "Bouton radio 'Closing date' sélectionné avec sélecteur alternatif (méthode alternative)",
+                      )
+                    } else {
+                      console.log(
+                        "Aucun bouton radio 'Closing date' trouvé après plusieurs tentatives (méthode alternative)",
+                      )
+                    }
+                  }
                 },
                 dateSelector,
                 startDate,
