@@ -3,7 +3,7 @@ import { NextResponse } from "next/server"
 // Cette route permet d'envoyer des pings périodiques à l'API Render
 // pour éviter qu'elle ne se mette en veille après une période d'inactivité
 export const runtime = "edge"
-export const maxDuration = 10
+export const maxDuration = 30
 
 export async function GET() {
   const diagnostics: string[] = []
@@ -42,7 +42,7 @@ export async function GET() {
           Expires: "0",
         },
         // Timeout court pour le ping
-        signal: AbortSignal.timeout(5000), // 5 secondes
+        signal: AbortSignal.timeout(20000), // 20 secondes
       })
 
       const pingDuration = Date.now() - pingStartTime
