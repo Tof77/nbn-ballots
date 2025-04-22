@@ -586,10 +586,9 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
         if (
           error &&
           typeof error === "object" &&
-          "name" in error &&
-          (error.name === "AbortError" ||
-            error.name === "TimeoutError" ||
-            (typeof error.message === "string" &&
+          (("name" in error && (error.name === "AbortError" || error.name === "TimeoutError")) ||
+            ("message" in error &&
+              typeof error.message === "string" &&
               (error.message.includes("aborted") ||
                 error.message.includes("timeout") ||
                 error.message.includes("Timeout"))))
