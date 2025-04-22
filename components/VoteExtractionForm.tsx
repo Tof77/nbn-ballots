@@ -520,7 +520,8 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
         console.log("Réponse brute de l'API:", responseText)
         setDebugInfo((prev) => `${prev}\n\nRéponse brute de l'API: ${responseText}`)
 
-        let json: ApiResponse
+        // Initialize json as an empty object before using it
+        let json: ApiResponse = { error: "Unknown error" }
 
         try {
           json = JSON.parse(responseText)
@@ -559,6 +560,12 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
             console.log("Mode démonstration activé")
             setDebugInfo((prev) => `${prev}\n\nMode démonstration activé - Utilisation de données simulées`)
           }
+
+          // Check for error response
+          if (!res.ok && !json.extractionId) {
+            setDebugInfo((prev) => `${prev}\n\nErreur de l'API: ${JSON.stringify(json, null, 2)}`)
+            throw new Error(json.error || "Erreur lors de l'extraction")
+          }
         } catch (parseError: unknown) {
           console.error("Erreur lors du parsing de la réponse JSON:", parseError)
           setDebugInfo(
@@ -567,6 +574,7 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
           )
           setError("La réponse de l'API n'est pas un JSON valide")
           setLoading(false)
+          throw parseError // Re-throw to be caught by the outer catch block
         }
 
         if (!res.ok && !json.extractionId) {
