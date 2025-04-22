@@ -2,8 +2,8 @@ import { type NextRequest, NextResponse } from "next/server"
 
 // Définir le runtime Node.js pour cette route API
 export const runtime = "nodejs"
-// Augmenter la durée maximale d'exécution à 600 secondes (10 minutes)
-export const maxDuration = 600
+// Augmenter la durée maximale d'exécution à 300 secondes (5 minutes) - maximum autorisé par Vercel
+export const maxDuration = 300
 
 // Définir les interfaces pour les types de données
 interface VoteDetail {
