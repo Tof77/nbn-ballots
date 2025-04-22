@@ -6,6 +6,10 @@ const port = process.env.PORT || 3000
 const path = require("path")
 const fs = require("fs")
 
+// Configuration des timeouts
+const SERVER_TIMEOUT = 10 * 60 * 1000 // 10 minutes en millisecondes
+const EXTRACTION_TIMEOUT = 8 * 60 * 1000 // 8 minutes en millisecondes
+
 // Activer CORS pour permettre les requêtes depuis votre application Vercel
 app.use(cors())
 app.use(express.json())
@@ -254,7 +258,7 @@ app.post("/api/extract-votes", async (req, res) => {
 
     // Configuration de Puppeteer avec des options améliorées
     browser = await puppeteer.launch({
-      headless: true, // Mettre à false pour le débogage visuel
+      headless: true,
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
@@ -264,14 +268,14 @@ app.post("/api/extract-votes", async (req, res) => {
         "--window-size=1920,1080",
       ],
       defaultViewport: { width: 1920, height: 1080 },
-      timeout: 60000, // Timeout global de 60 secondes
+      timeout: 120000, // Augmenter à 120 secondes
     })
 
     try {
       const page = await browser.newPage()
 
       // Configurer les timeouts de navigation
-      page.setDefaultNavigationTimeout(60000) // Augmenter le timeout à 60 secondes
+      page.setDefaultNavigationTimeout(120000) // Augmenter à 120 secondes
       page.setDefaultTimeout(60000)
 
       // Activer la journalisation de la console du navigateur
