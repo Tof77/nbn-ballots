@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import VoteExtractionForm from "@/components/VoteExtractionForm"
-import ChunkedExtractionForm from "@/components/ChunkedExtractionForm"
+import StreamingExtractionForm from "@/components/StreamingExtractionForm"
 import ResultsDisplay from "@/components/ResultsDisplay"
 
 interface ScreenshotInfo {
@@ -14,8 +14,45 @@ export default function Home() {
   const [results, setResults] = useState<any[]>([])
   const [demoMode, setDemoMode] = useState(false)
   const [screenshotUrls, setScreenshotUrls] = useState<ScreenshotInfo[]>([])
-  const [useChunkedExtraction, setUseChunkedExtraction] = useState(true)
+  const [useStreamingExtraction, setUseStreamingExtraction] = useState(true)
 
+  // Fonction pour gérer la réception d'un vote individuel
+  const handleVoteReceived = (vote: any) => {
+    setResults((prevResults) => {
+      // Vérifier si le vote existe déjà
+      const existingIndex = prevResults.findIndex((v) => v.id === vote.id)
+
+      if (existingIndex >= 0) {
+        // Remplacer le vote existant
+        const newResults = [...prevResults]
+        newResults[existingIndex] = vote
+        return newResults
+      } else {
+        // Ajouter le nouveau vote
+        return [...prevResults, vote]
+      }
+    })
+  }
+
+  // Fonction pour gérer la fin de l'extraction
+  const handleExtractionComplete = (isDemoMode: boolean) => {
+    setDemoMode(isDemoMode)
+  }
+
+  // Fonction pour gérer le début de l'extraction
+  const handleExtractionStart = () => {
+    // Réinitialiser les résultats
+    setResults([])
+    setDemoMode(false)
+    setScreenshotUrls([])
+  }
+
+  // Fonction pour gérer les erreurs
+  const handleError = (error: string) => {
+    console.error("Erreur d'extraction:", error)
+  }
+
+  // Fonction pour gérer les résultats de l'extraction standard
   const handleResultsReceived = (newResults: any[], isDemoMode = false, screenshots: ScreenshotInfo[] = []) => {
     setResults(newResults)
     setDemoMode(isDemoMode)
@@ -29,21 +66,26 @@ export default function Home() {
       <div className="max-w-6xl mx-auto">
         <div className="mb-4 flex justify-end">
           <button
-            className={`px-4 py-2 rounded-md text-sm font-medium ${useChunkedExtraction ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-800"}`}
-            onClick={() => setUseChunkedExtraction(true)}
+            className={`px-4 py-2 rounded-md text-sm font-medium ${useStreamingExtraction ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-800"}`}
+            onClick={() => setUseStreamingExtraction(true)}
           >
-            Mode optimisé
+            Mode streaming
           </button>
           <button
-            className={`ml-2 px-4 py-2 rounded-md text-sm font-medium ${!useChunkedExtraction ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-800"}`}
-            onClick={() => setUseChunkedExtraction(false)}
+            className={`ml-2 px-4 py-2 rounded-md text-sm font-medium ${!useStreamingExtraction ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-800"}`}
+            onClick={() => setUseStreamingExtraction(false)}
           >
             Mode standard
           </button>
         </div>
 
-        {useChunkedExtraction ? (
-          <ChunkedExtractionForm onResultsReceived={handleResultsReceived} />
+        {useStreamingExtraction ? (
+          <StreamingExtractionForm
+            onVoteReceived={handleVoteReceived}
+            onExtractionComplete={handleExtractionComplete}
+            onExtractionStart={handleExtractionStart}
+            onError={handleError}
+          />
         ) : (
           <VoteExtractionForm onResultsReceived={handleResultsReceived} />
         )}
