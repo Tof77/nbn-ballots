@@ -2,8 +2,8 @@ import { type NextRequest, NextResponse } from "next/server"
 
 // Définir le runtime Node.js pour cette route API
 export const runtime = "nodejs"
-// Augmenter la durée maximale d'exécution à 300 secondes (5 minutes)
-export const maxDuration = 300
+// Augmenter la durée maximale d'exécution à 600 secondes (10 minutes)
+export const maxDuration = 600
 
 // Définir les interfaces pour les types de données
 interface VoteDetail {
@@ -311,9 +311,9 @@ export async function POST(req: NextRequest) {
             // Ajouter un timeout beaucoup plus long pour l'extraction
             const controller = new AbortController()
             const timeoutId = setTimeout(() => {
-              diagnostics.push("Timeout manuel déclenché après 240 secondes")
-              controller.abort(new Error("Timeout manuel après 240 secondes"))
-            }, 240000) // 4 minutes
+              diagnostics.push("Timeout manuel déclenché après 480 secondes")
+              controller.abort(new Error("Timeout manuel après 480 secondes"))
+            }, 480000) // 8 minutes
 
             // Ajouter un paramètre de cache-buster pour éviter les réponses en cache
             const timestamp = Date.now()
