@@ -587,9 +587,17 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
           error &&
           typeof error === "object" &&
           "name" in error &&
-          (error.name === "AbortError" || error.name === "TimeoutError")
+          (error.name === "AbortError" ||
+            error.name === "TimeoutError" ||
+            (typeof error.message === "string" &&
+              (error.message.includes("aborted") ||
+                error.message.includes("timeout") ||
+                error.message.includes("Timeout"))))
         ) {
-          setDebugInfo((prev) => `${prev}\n\nL'opération a expiré (timeout). L'extraction prend trop de temps.`)
+          setDebugInfo(
+            (prev) =>
+              `${prev}\n\nL'opération a expiré (timeout). L'extraction prend trop de temps.\nDétails de l'erreur: ${JSON.stringify(error)}`,
+          )
           setError(
             "L'opération a expiré. L'extraction des votes prend trop de temps. Essayez de réduire la plage de dates ou de désactiver l'extraction des détails des votes.",
           )
