@@ -2,7 +2,7 @@ import { type NextRequest, NextResponse } from "next/server"
 
 // Définir le runtime Node.js pour cette route API
 export const runtime = "nodejs"
-// Définir la durée maximale d'exécution à 90 secondes
+// Définir la durée maximale d'exécution à 90 secondes (1 minute 30 secondes)
 export const maxDuration = 90
 
 // Cette route API permet d'extraire les votes par lots (chunks)
