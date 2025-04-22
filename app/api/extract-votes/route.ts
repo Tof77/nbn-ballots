@@ -110,7 +110,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const diagnostics: string[] = []
   const startTime = Date.now()
-  let extractionId: string // Déclaration de la variable extractionId
+  const extractionId: string = generateExtractionId() // Initialiser avec une valeur par défaut
 
   try {
     // Récupérer et journaliser les données brutes
@@ -176,7 +176,7 @@ export async function POST(req: NextRequest) {
     console.log("API - RENDER_API_URL:", renderApiUrl)
 
     // Générer un ID unique pour cette extraction
-    extractionId = generateExtractionId()
+    // extractionId = generateExtractionId() // Moved to declaration
 
     // Créer une entrée dans la map pour suivre l'état de l'extraction
     extractionStatusMap.set(extractionId, {
@@ -889,12 +889,14 @@ export async function POST(req: NextRequest) {
     console.error("API - Erreur générale:", error)
 
     // Mettre à jour le statut avec l'erreur
-    extractionStatusMap.set(extractionId, {
-      ...extractionStatusMap.get(extractionId)!,
-      status: "failed",
-      message: `Erreur lors de l'extraction des votes: ${error instanceof Error ? error.message : String(error)}`,
-      endTime: Date.now(),
-    })
+    if (extractionId) {
+      extractionStatusMap.set(extractionId, {
+        ...extractionStatusMap.get(extractionId)!,
+        status: "failed",
+        message: `Erreur lors de l'extraction des votes: ${error instanceof Error ? error.message : String(error)}`,
+        endTime: Date.now(),
+      })
+    }
 
     return NextResponse.json(
       {
