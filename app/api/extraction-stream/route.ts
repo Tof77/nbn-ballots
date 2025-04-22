@@ -84,8 +84,8 @@ export async function POST(req: NextRequest) {
     // Mettre à jour l'extraction avec les nouvelles données
     if (data.votes && Array.isArray(data.votes)) {
       // Ajouter uniquement les nouveaux votes
-      const existingIds = new Set(extraction.votes.map((v) => v.id))
-      const newVotes = data.votes.filter((v) => !existingIds.has(v.id))
+      const existingIds = new Set(extraction.votes.map((v: any) => v.id))
+      const newVotes = data.votes.filter((v: any) => !existingIds.has(v.id))
 
       extraction.votes.push(...newVotes)
     }
