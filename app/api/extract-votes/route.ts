@@ -50,12 +50,11 @@ function createExtraction(id: string): ExtractionState {
 }
 
 // Fonction pour mettre à jour l'état d'une extraction
-function updateExtraction(
-  id: string,
-  updates: Partial<Omit<ExtractionState, "id" | "startTime">>,
-): ExtractionState | null {
+function updateExtraction(id: string, updates: Partial<Omit<ExtractionState, "id" | "startTime">>): ExtractionState {
   const extraction = extractionStore.get(id)
-  if (!extraction) return null
+  if (!extraction) {
+    throw new Error(`Extraction ${id} non trouvée`)
+  }
 
   const updatedExtraction = { ...extraction, ...updates }
   extractionStore.set(id, updatedExtraction)
@@ -68,23 +67,47 @@ function getExtraction(id: string): ExtractionState | null {
 }
 
 // Fonction pour compléter une extraction
-function completeExtraction(id: string, result: any): ExtractionState | null {
-  return updateExtraction(id, {
-    status: "completed",
-    endTime: Date.now(),
-    progress: 100,
-    message: "Extraction terminée avec succès",
-    result,
-  })
+function completeExtraction(id: string, result: any): ExtractionState {
+  try {
+    return updateExtraction(id, {
+      status: "completed",
+      endTime: Date.now(),
+      progress: 100,
+      message: "Extraction terminée avec succès",
+      result,
+    })
+  } catch (error) {
+    console.error(`Erreur lors de la complétion de l'extraction ${id}:`, error)
+    // Créer une nouvelle extraction si elle n'existe pas
+    const extraction = createExtraction(id)
+    extraction.status = "completed"
+    extraction.endTime = Date.now()
+    extraction.progress = 100
+    extraction.message = "Extraction terminée avec succès"
+    extraction.result = result
+    extractionStore.set(id, extraction)
+    return extraction
+  }
 }
 
 // Fonction pour marquer une extraction comme échouée
-function failExtraction(id: string, message: string): ExtractionState | null {
-  return updateExtraction(id, {
-    status: "failed",
-    endTime: Date.now(),
-    message,
-  })
+function failExtraction(id: string, message: string): ExtractionState {
+  try {
+    return updateExtraction(id, {
+      status: "failed",
+      endTime: Date.now(),
+      message,
+    })
+  } catch (error) {
+    console.error(`Erreur lors de l'échec de l'extraction ${id}:`, error)
+    // Créer une nouvelle extraction si elle n'existe pas
+    const extraction = createExtraction(id)
+    extraction.status = "failed"
+    extraction.endTime = Date.now()
+    extraction.message = message
+    extractionStore.set(id, extraction)
+    return extraction
+  }
 }
 
 export async function GET(request: NextRequest) {
@@ -110,7 +133,7 @@ export async function GET(request: NextRequest) {
   return NextResponse.json(extraction)
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(request: NextRequest): Promise<Response> {
   // Nettoyer les anciennes extractions
   cleanupExtractionStore()
 
@@ -141,7 +164,14 @@ export async function POST(request: NextRequest) {
     const renderApiUrl = process.env.RENDER_API_URL
 
     if (!renderApiUrl) {
-      return failExtraction(extractionId, "L'URL de l'API Render n'est pas configurée (RENDER_API_URL manquante)")
+      failExtraction(extractionId, "L'URL de l'API Render n'est pas configurée (RENDER_API_URL manquante)")
+      return NextResponse.json(
+        {
+          error: "L'URL de l'API Render n'est pas configurée (RENDER_API_URL manquante)",
+          extractionId,
+        },
+        { status: 500 },
+      )
     }
 
     // Préparer les données à envoyer à l'API Render
