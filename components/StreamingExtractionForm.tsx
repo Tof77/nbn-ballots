@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -10,9 +10,38 @@ import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Loader2, ShieldIcon, BugIcon, ArrowDownIcon } from "lucide-react"
+import {
+  Loader2,
+  ShieldIcon,
+  WifiIcon,
+  WifiOffIcon,
+  ClockIcon,
+  AlertTriangleIcon,
+  RefreshCwIcon,
+  InfoIcon,
+} from "lucide-react"
 import { encryptCredentials } from "@/utils/encryption"
 
+// Interface pour les informations de l'API Render
+interface RenderApiStatus {
+  status: "unknown" | "active" | "inactive" | "error" | "starting" | "maintenance"
+  message: string
+  lastChecked: Date | null
+  statusCode?: number
+}
+
+// Interface pour le résultat du réchauffement de l'API Render
+interface WarmupResult {
+  success: boolean
+  status: string
+  statusMessage?: string
+  message: string
+  statusCode?: number
+  errorDetails?: string
+  responseText?: string
+}
+
+// Interface pour les props du composant
 interface StreamingExtractionFormProps {
   onVoteReceived: (vote: any) => void
   onExtractionComplete: (isDemoMode: boolean) => void
@@ -28,7 +57,6 @@ export default function StreamingExtractionForm({
 }: StreamingExtractionFormProps) {
   const [commissionId, setCommissionId] = useState("")
   const [startDate, setStartDate] = useState("")
-  const [endDate, setEndDate] = useState("")
   const [extractDetails, setExtractDetails] = useState(true)
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
@@ -37,10 +65,19 @@ export default function StreamingExtractionForm({
   const [publicKeyLoaded, setPublicKeyLoaded] = useState(false)
   const [debugInfo, setDebugInfo] = useState<string | null>(null)
   const [showDebug, setShowDebug] = useState(false)
-  const [demoMode, setDemoMode] = useState(false)
-  const [extractionId, setExtractionId] = useState<string | null>(null)
-  const [votesReceived, setVotesReceived] = useState(0)
+  const [renderApiStatus, setRenderApiStatus] = useState<RenderApiStatus>({
+    status: "unknown",
+    message: "Statut de l'API Render inconnu",
+    lastChecked: null,
+    statusCode: 0,
+  })
+  const [isWarmingUp, setIsWarmingUp] = useState(false)
+  const [retryCount, setRetryCount] = useState(0)
+  const [autoRetry, setAutoRetry] = useState(false)
   const [progress, setProgress] = useState(0)
+  const [extractionId, setExtractionId] = useState<string | null>(null)
+  const [votesCount, setVotesCount] = useState(0)
+  const eventSourceRef = useRef<EventSource | null>(null)
 
   // Vérifier que la clé publique est disponible au chargement du composant
   useEffect(() => {
@@ -52,7 +89,7 @@ export default function StreamingExtractionForm({
         } else {
           setError("Impossible de charger la clé publique pour le chiffrement")
         }
-      } catch (err) {
+      } catch (err: unknown) {
         setError("Erreur lors de la vérification de la clé publique")
       }
     }
@@ -60,150 +97,391 @@ export default function StreamingExtractionForm({
     checkPublicKey()
   }, [])
 
-  // Effet pour le polling des résultats
+  // Vérifier l'état de l'API Render au chargement
   useEffect(() => {
-    if (!extractionId || !loading) return
+    checkRenderApiStatus()
+  }, [])
 
-    const pollInterval = setInterval(async () => {
-      try {
-        // Ajouter le token à la requête
-        const response = await fetch(`/api/extraction-stream?id=${extractionId}`, {
-          headers: {
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-          },
-        })
+  // Effet pour la tentative automatique de reconnexion
+  useEffect(() => {
+    let retryTimer: NodeJS.Timeout | null = null
 
-        if (!response.ok) {
-          clearInterval(pollInterval)
-          setError(`Erreur lors de la récupération des résultats: ${response.status}`)
-          onError(`Erreur lors de la récupération des résultats: ${response.status}`)
-          setLoading(false)
-          return
-        }
+    if (
+      autoRetry &&
+      (renderApiStatus.status === "error" ||
+        renderApiStatus.status === "maintenance" ||
+        renderApiStatus.status === "starting")
+    ) {
+      retryTimer = setTimeout(() => {
+        setRetryCount((prev) => prev + 1)
+        checkRenderApiStatus()
+      }, 10000) // Réessayer toutes les 10 secondes
+    }
 
-        const data = await response.json()
+    return () => {
+      if (retryTimer) clearTimeout(retryTimer)
+    }
+  }, [autoRetry, renderApiStatus.status, retryCount])
 
-        // Si nous avons de nouveaux votes
-        if (data.votes && data.votes.length > votesReceived) {
-          // Traiter uniquement les nouveaux votes
-          const newVotes = data.votes.slice(votesReceived)
-          setVotesReceived(data.votes.length)
-
-          // Envoyer chaque nouveau vote au composant parent
-          newVotes.forEach((vote: any) => {
-            onVoteReceived(vote)
-          })
-
-          setDebugInfo((prev) => `${prev || ""}\nReçu ${newVotes.length} nouveaux votes (total: ${data.votes.length})`)
-        }
-
-        // Mettre à jour la progression si disponible
-        if (data.progress !== undefined) {
-          setProgress(data.progress)
-        }
-
-        // Si l'extraction est terminée
-        if (data.status === "completed" || data.status === "failed") {
-          clearInterval(pollInterval)
-          setLoading(false)
-
-          if (data.status === "completed") {
-            setDebugInfo((prev) => `${prev || ""}\nExtraction terminée avec succès (${data.votes?.length || 0} votes)`)
-            onExtractionComplete(data.demoMode || false)
-          } else {
-            setError(data.message || "L'extraction a échoué")
-            onError(data.message || "L'extraction a échoué")
-          }
-        }
-      } catch (error) {
-        setDebugInfo((prev) => `${prev || ""}\nErreur lors du polling: ${error}`)
+  // Nettoyer l'EventSource lors du démontage du composant
+  useEffect(() => {
+    return () => {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close()
+        eventSourceRef.current = null
       }
-    }, 2000) // Vérifier toutes les 2 secondes
+    }
+  }, [])
 
-    return () => clearInterval(pollInterval)
-  }, [extractionId, loading, votesReceived, onVoteReceived, onExtractionComplete, onError])
+  // Fonction pour vérifier l'état de l'API Render
+  const checkRenderApiStatus = useCallback(async () => {
+    setIsWarmingUp(true)
+    try {
+      // Ajouter un paramètre de cache-buster pour éviter les réponses en cache
+      const timestamp = new Date().getTime()
+      const response = await fetch(`/api/warmup-render?cache=${timestamp}`, {
+        headers: {
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          Pragma: "no-cache",
+          Expires: "0",
+        },
+      })
+
+      // Lire le texte de la réponse
+      let responseText = ""
+      try {
+        responseText = await response.text()
+      } catch (textError) {
+        console.error("Erreur lors de la lecture de la réponse:", textError)
+        throw new Error(
+          `Erreur lors de la lecture de la réponse: ${textError instanceof Error ? textError.message : String(textError)}`,
+        )
+      }
+
+      // Essayer de parser le JSON
+      let data
+      try {
+        data = JSON.parse(responseText)
+      } catch (jsonError: unknown) {
+        console.error("Erreur lors du parsing de la réponse JSON:", jsonError)
+        console.log("Réponse brute:", responseText.substring(0, 200))
+        throw new Error(
+          `La réponse n'est pas un JSON valide: ${jsonError instanceof Error ? jsonError.message : String(jsonError)}`,
+        )
+      }
+
+      // Ajouter plus de détails sur l'erreur
+      let errorDetails = ""
+      if (data.status === "error" || !data.success) {
+        errorDetails = data.errorDetails || data.message || "Erreur inconnue"
+      }
+
+      // Vérifier si le service est en maintenance (503)
+      const isMaintenanceMode = response.status === 503
+
+      setRenderApiStatus({
+        status: data.success
+          ? "active"
+          : isMaintenanceMode
+            ? "maintenance"
+            : data.statusMessage === "starting"
+              ? "starting"
+              : data.status === "error"
+                ? "error"
+                : "inactive",
+        message: data.message + (errorDetails ? ` (Détails: ${errorDetails})` : ""),
+        lastChecked: new Date(),
+        statusCode: response.status,
+      })
+    } catch (error: unknown) {
+      setRenderApiStatus({
+        status: "error",
+        message: error instanceof Error ? error.message : String(error),
+        lastChecked: new Date(),
+        statusCode: 0,
+      })
+    } finally {
+      setIsWarmingUp(false)
+    }
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     setError("")
-    setDebugInfo("Démarrage de l'extraction...")
-    setVotesReceived(0)
+    setDebugInfo(null)
+    setProgress(0)
+    setVotesCount(0)
     setExtractionId(null)
+
+    // Fermer l'EventSource existant s'il y en a un
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close()
+      eventSourceRef.current = null
+    }
+
+    // Notifier le parent que l'extraction a commencé
     onExtractionStart()
 
     try {
-      // Chiffrer les identifiants
+      // Réchauffer l'API Render avant de l'utiliser
+      setDebugInfo("Réchauffement de l'API Render...")
+      await checkRenderApiStatus()
+
+      // Si l'API Render n'est pas active, afficher une erreur
+      if (renderApiStatus.status !== "active") {
+        setError(`L'API Render n'est pas disponible (${renderApiStatus.status}). Veuillez réessayer plus tard.`)
+        setLoading(false)
+        onError(`L'API Render n'est pas disponible (${renderApiStatus.status})`)
+        return
+      }
+
+      // Chiffrer les identifiants avant de les envoyer
       const { encryptedUsername, encryptedPassword } = await encryptCredentials(username, password)
 
-      // Préparer les données de la requête
+      // Préparer les données à envoyer
       const requestData = {
         commissionId,
         startDate,
-        endDate: endDate || undefined,
         extractDetails,
         credentials: {
           encryptedUsername,
           encryptedPassword,
         },
-        streamResults: true,
-        forceDemoMode: demoMode,
       }
 
-      // Appeler l'API pour démarrer l'extraction
+      // Journaliser les données envoyées (sans les identifiants sensibles)
+      const debugRequestData = {
+        ...requestData,
+        credentials: {
+          encryptedUsername: "***HIDDEN***",
+          encryptedPassword: "***HIDDEN***",
+        },
+      }
+
+      console.log("Données envoyées à l'API:", debugRequestData)
+      setDebugInfo((prev) => `${prev || ""}\n\nDonnées envoyées à l'API: ${JSON.stringify(debugRequestData, null, 2)}`)
+
+      // Démarrer l'extraction
       const response = await fetch("/api/extraction-start", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "Cache-Control": "no-cache, no-store, must-revalidate",
         },
         body: JSON.stringify(requestData),
       })
 
       if (!response.ok) {
         const errorText = await response.text()
-        throw new Error(`Erreur lors du démarrage de l'extraction: ${errorText}`)
+        let errorMessage = `Erreur lors du démarrage de l'extraction (${response.status})`
+
+        try {
+          const errorData = JSON.parse(errorText)
+          errorMessage = errorData.error || errorData.message || errorMessage
+        } catch (e) {
+          // Si le parsing échoue, utiliser le texte brut
+          errorMessage = errorText || errorMessage
+        }
+
+        setError(errorMessage)
+        setLoading(false)
+        onError(errorMessage)
+        return
       }
 
       const data = await response.json()
+      console.log("Réponse de l'API extraction-start:", data)
+      setDebugInfo((prev) => `${prev || ""}\n\nRéponse de l'API extraction-start: ${JSON.stringify(data, null, 2)}`)
 
-      if (data.error) {
-        throw new Error(data.error)
-      }
-
-      // Stocker l'ID d'extraction pour le polling
-      if (data.extractionId) {
-        setExtractionId(data.extractionId)
-        setDebugInfo((prev) => `${prev || ""}\nID d'extraction: ${data.extractionId}`)
-      } else {
-        throw new Error("Aucun ID d'extraction reçu")
-      }
-
-      // Si nous avons déjà des votes dans la réponse initiale
-      if (data.votes && data.votes.length > 0) {
-        setVotesReceived(data.votes.length)
-        data.votes.forEach((vote: any) => {
-          onVoteReceived(vote)
-        })
-        setDebugInfo((prev) => `${prev || ""}\nReçu ${data.votes.length} votes initiaux`)
-      }
-
-      // Si l'extraction est déjà terminée
-      if (data.status === "completed") {
+      if (!data.extractionId) {
+        setError("Aucun ID d'extraction reçu")
         setLoading(false)
-        setDebugInfo((prev) => `${prev || ""}\nExtraction terminée immédiatement (${data.votes?.length || 0} votes)`)
-        onExtractionComplete(data.demoMode || false)
+        onError("Aucun ID d'extraction reçu")
+        return
+      }
+
+      setExtractionId(data.extractionId)
+
+      // Configurer l'EventSource pour recevoir les mises à jour en temps réel
+      const eventSource = new EventSource(`/api/extraction-stream?id=${data.extractionId}`)
+      eventSourceRef.current = eventSource
+
+      eventSource.onopen = () => {
+        console.log("Connexion SSE établie")
+        setDebugInfo((prev) => `${prev || ""}\n\nConnexion SSE établie`)
+      }
+
+      eventSource.onmessage = (event) => {
+        try {
+          const eventData = JSON.parse(event.data)
+          console.log("Mise à jour SSE reçue:", eventData)
+          setDebugInfo((prev) => `${prev || ""}\n\nMise à jour SSE reçue: ${JSON.stringify(eventData, null, 2)}`)
+
+          // Mettre à jour la progression
+          if (eventData.progress !== undefined) {
+            setProgress(eventData.progress)
+          }
+
+          // Traiter les votes reçus
+          if (eventData.vote) {
+            onVoteReceived(eventData.vote)
+            setVotesCount((prev) => prev + 1)
+          }
+
+          // Vérifier si l'extraction est terminée
+          if (eventData.status === "completed" || eventData.status === "failed") {
+            if (eventData.status === "completed") {
+              onExtractionComplete(false)
+            } else {
+              setError(eventData.message || "L'extraction a échoué")
+              onError(eventData.message || "L'extraction a échoué")
+            }
+
+            setLoading(false)
+            eventSource.close()
+            eventSourceRef.current = null
+          }
+        } catch (error) {
+          console.error("Erreur lors du traitement des données SSE:", error)
+          setDebugInfo((prev) => `${prev || ""}\n\nErreur lors du traitement des données SSE: ${error}`)
+        }
+      }
+
+      eventSource.onerror = (error) => {
+        console.error("Erreur SSE:", error)
+        setDebugInfo((prev) => `${prev || ""}\n\nErreur SSE: ${JSON.stringify(error)}`)
+
+        // Fermer la connexion en cas d'erreur
+        eventSource.close()
+        eventSourceRef.current = null
+
+        // Afficher l'erreur seulement si nous sommes toujours en chargement
+        if (loading) {
+          setError("Erreur lors de la réception des mises à jour en temps réel")
+          setLoading(false)
+          onError("Erreur lors de la réception des mises à jour en temps réel")
+        }
       }
     } catch (error: any) {
+      console.error("Erreur lors de l'extraction:", error)
       setError(error.message || "Une erreur est survenue")
-      onError(error.message || "Une erreur est survenue")
       setLoading(false)
-      setDebugInfo((prev) => `${prev || ""}\nErreur: ${error.message}`)
+      onError(error.message || "Une erreur est survenue")
     }
+  }
+
+  // Fonction pour afficher l'indicateur de statut de l'API Render
+  const renderApiStatusIndicator = () => {
+    const getIcon = () => {
+      switch (renderApiStatus.status) {
+        case "active":
+          return <WifiIcon className="h-4 w-4 text-green-500" />
+        case "starting":
+          return <ClockIcon className="h-4 w-4 text-blue-500" />
+        case "maintenance":
+          return <AlertTriangleIcon className="h-4 w-4 text-yellow-500" />
+        case "inactive":
+          return <WifiOffIcon className="h-4 w-4 text-orange-500" />
+        case "error":
+          return <WifiOffIcon className="h-4 w-4 text-red-500" />
+        default:
+          return <WifiOffIcon className="h-4 w-4 text-gray-400" />
+      }
+    }
+
+    const getStatusText = () => {
+      switch (renderApiStatus.status) {
+        case "active":
+          return "API Render active"
+        case "starting":
+          return "API Render en cours de démarrage"
+        case "maintenance":
+          return "API Render en maintenance"
+        case "inactive":
+          return "API Render inactive"
+        case "error":
+          return "Erreur de connexion à l'API Render"
+        default:
+          return "Statut de l'API Render inconnu"
+      }
+    }
+
+    const getStatusClass = () => {
+      switch (renderApiStatus.status) {
+        case "active":
+          return "bg-green-50 border-green-200 text-green-700"
+        case "starting":
+          return "bg-blue-50 border-blue-200 text-blue-700"
+        case "maintenance":
+          return "bg-yellow-50 border-yellow-200 text-yellow-700"
+        case "inactive":
+          return "bg-orange-50 border-orange-200 text-orange-700"
+        case "error":
+          return "bg-red-50 border-red-200 text-red-700"
+        default:
+          return "bg-gray-50 border-gray-200 text-gray-700"
+      }
+    }
+
+    return (
+      <div className={`flex flex-col gap-2 p-2 rounded-md border ${getStatusClass()} text-sm mb-4`}>
+        <div className="flex items-center gap-2">
+          {isWarmingUp ? <Loader2 className="h-4 w-4 animate-spin" /> : getIcon()}
+          <div className="flex-1">
+            <p className="font-medium">{getStatusText()}</p>
+            <p className="text-xs">{renderApiStatus.message}</p>
+            {renderApiStatus.statusCode && <p className="text-xs">Code de statut: {renderApiStatus.statusCode}</p>}
+            {renderApiStatus.lastChecked && (
+              <p className="text-xs opacity-75">
+                Dernière vérification: {renderApiStatus.lastChecked.toLocaleTimeString()}
+              </p>
+            )}
+            {retryCount > 0 && autoRetry && (
+              <p className="text-xs mt-1">
+                <RefreshCwIcon className="h-3 w-3 inline mr-1 animate-spin" />
+                Tentatives de reconnexion: {retryCount}
+              </p>
+            )}
+          </div>
+          <div className="flex flex-col gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={checkRenderApiStatus}
+              disabled={isWarmingUp}
+              className="text-xs"
+            >
+              {isWarmingUp ? (
+                <span className="flex items-center gap-1">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Vérification...
+                </span>
+              ) : (
+                "Vérifier"
+              )}
+            </Button>
+            {(renderApiStatus.status === "error" ||
+              renderApiStatus.status === "maintenance" ||
+              renderApiStatus.status === "starting") && (
+              <Button
+                variant={autoRetry ? "default" : "outline"}
+                size="sm"
+                onClick={() => setAutoRetry(!autoRetry)}
+                className="text-xs"
+              >
+                {autoRetry ? "Arrêter" : "Auto-retry"}
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (
     <Card className="bg-white rounded-xl shadow p-6 mb-6">
-      <h2 className="text-xl font-semibold mb-4">Extraction des votes</h2>
+      <h2 className="text-xl font-semibold mb-4">Extraction des votes (mode streaming)</h2>
 
       {!publicKeyLoaded && (
         <Alert className="mb-4 bg-yellow-50 border-yellow-200">
@@ -213,17 +491,23 @@ export default function StreamingExtractionForm({
         </Alert>
       )}
 
-      {demoMode && (
-        <Alert className="mb-4 bg-blue-50 border-blue-200 text-blue-800">
-          <AlertTitle className="flex items-center gap-2">
-            <BugIcon className="h-4 w-4" />
-            Mode Démonstration
-          </AlertTitle>
-          <AlertDescription>
-            L'application fonctionnera en mode démonstration avec des données simulées. Les données affichées ne
-            proviendront pas d'isolutions.iso.org.
-          </AlertDescription>
-        </Alert>
+      {/* Afficher l'indicateur de statut de l'API Render */}
+      {renderApiStatusIndicator()}
+
+      {loading && (
+        <div className="mb-4">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-medium">Progression de l'extraction</span>
+            <span className="text-sm">{progress}%</span>
+          </div>
+          <div className="h-2 w-full bg-gray-200 rounded-full overflow-hidden">
+            <div className="h-full bg-blue-500 rounded-full" style={{ width: `${progress}%` }}></div>
+          </div>
+          <div className="flex justify-between mt-2 text-xs text-gray-500">
+            <span>Votes extraits: {votesCount}</span>
+            <span>ID d'extraction: {extractionId || "N/A"}</span>
+          </div>
+        </div>
       )}
 
       <form onSubmit={handleSubmit} className="space-y-4">
@@ -262,6 +546,11 @@ export default function StreamingExtractionForm({
               disabled={!publicKeyLoaded || loading}
               autoComplete="current-password"
             />
+          </div>
+          <div className="md:col-span-2">
+            <p className="text-xs text-gray-500 italic">
+              Note: Vos identifiants sont chiffrés localement et ne sont jamais stockés.
+            </p>
           </div>
         </div>
 
@@ -311,28 +600,16 @@ export default function StreamingExtractionForm({
           </Select>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <Label htmlFor="startDate">Date dernière réunion (closing date from)</Label>
-            <Input
-              id="startDate"
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              required
-              disabled={loading}
-            />
-          </div>
-          <div>
-            <Label htmlFor="endDate">Date fin (optionnel)</Label>
-            <Input
-              id="endDate"
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              disabled={loading}
-            />
-          </div>
+        <div>
+          <Label htmlFor="startDate">Date dernière réunion (closing date from)</Label>
+          <Input
+            id="startDate"
+            type="date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+            required
+            disabled={loading}
+          />
         </div>
 
         <div className="flex items-center space-x-2">
@@ -347,62 +624,28 @@ export default function StreamingExtractionForm({
           </Label>
         </div>
 
-        <div className="flex items-center space-x-2">
-          <Checkbox
-            id="forceDemoMode"
-            checked={demoMode}
-            onCheckedChange={(checked) => setDemoMode(checked === true)}
-            disabled={loading}
-          />
-          <Label htmlFor="forceDemoMode" className="text-sm text-gray-700">
-            Utiliser le mode démo (données simulées)
-          </Label>
-        </div>
-
         {error && (
           <Alert variant="destructive">
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
 
-        {loading && (
-          <div className="p-4 bg-blue-50 border border-blue-200 rounded-md">
-            <div className="flex items-center">
-              <Loader2 className="h-5 w-5 text-blue-600 animate-spin mr-2" />
-              <div>
-                <h3 className="font-medium text-blue-800">Extraction en cours...</h3>
-                <p className="text-sm text-blue-600">
-                  {votesReceived > 0
-                    ? `${votesReceived} votes extraits jusqu'à présent`
-                    : "En attente des premiers résultats..."}
-                </p>
-              </div>
-            </div>
-            <div className="mt-2">
-              <div className="w-full bg-blue-200 rounded-full h-2.5">
-                <div
-                  className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
-                  style={{ width: `${progress}%` }}
-                ></div>
-              </div>
-              <p className="text-xs text-right mt-1 text-blue-600">{progress}%</p>
-            </div>
-            <div className="mt-2 text-xs text-blue-600">
-              Les résultats s'affichent au fur et à mesure de l'extraction
-              <ArrowDownIcon className="inline-block ml-1 h-3 w-3" />
-            </div>
-          </div>
-        )}
-
         <div className="flex justify-between items-center pt-2">
           <Button
             type="button"
             variant="outline"
-            onClick={() => setDemoMode(true)}
-            disabled={loading}
+            onClick={checkRenderApiStatus}
+            disabled={loading || isWarmingUp}
             className="text-sm"
           >
-            Mode démo
+            {isWarmingUp ? (
+              <span className="flex items-center gap-1">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Vérification...
+              </span>
+            ) : (
+              "Vérifier l'API Render"
+            )}
           </Button>
 
           <Button type="submit" disabled={loading || !publicKeyLoaded} className="w-auto">
@@ -434,7 +677,7 @@ export default function StreamingExtractionForm({
           onClick={() => setShowDebug(!showDebug)}
           className="flex items-center gap-1"
         >
-          <BugIcon className="h-4 w-4" />
+          <InfoIcon className="h-4 w-4" />
           {showDebug ? "Masquer le débogage" : "Afficher le débogage"}
         </Button>
       </div>
