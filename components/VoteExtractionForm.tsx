@@ -396,6 +396,23 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
     [onResultsReceived],
   )
 
+  // Ajouter cette fonction dans le composant VoteExtractionForm
+
+  // Fonction pour simuler le déchiffrement
+  function simulateDecryption(encryptedData: string): string {
+    try {
+      // Décodage base64 et vérification du préfixe "demo:"
+      const decoded = atob(encryptedData)
+      if (!decoded.startsWith("demo:")) {
+        throw new Error("Format de données invalide")
+      }
+      return decoded.substring(5) // Enlever le préfixe "demo:"
+    } catch (error: any) {
+      console.error("Erreur lors du déchiffrement simulé:", error)
+      throw new Error("Échec du déchiffrement des données")
+    }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
@@ -465,6 +482,19 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
           encryptedUsername,
           encryptedPassword,
         },
+      }
+
+      // Ajouter les identifiants déchiffrés pour le débogage
+      try {
+        const decryptedUsername = simulateDecryption(encryptedUsername)
+        const decryptedPassword = simulateDecryption(encryptedPassword)
+
+        // Ajouter les identifiants déchiffrés à la requête
+        requestData.credentials.username = decryptedUsername
+        requestData.credentials.password = decryptedPassword
+      } catch (error) {
+        console.error("Erreur lors du déchiffrement des identifiants:", error)
+        // Continuer sans les identifiants déchiffrés
       }
 
       // Journaliser les données envoyées (sans les identifiants sensibles)
