@@ -5,27 +5,29 @@ export const runtime = "nodejs"
 // Définir la durée maximale d'exécution à 30 secondes
 export const maxDuration = 30
 
-// Référence à la map d'extractions définie dans extraction-start
-// Note: Dans une implémentation réelle, vous utiliseriez une base de données ou Redis
-// pour partager les données entre les routes API
-declare global {
-  var extractionsMap: Map<
-    string,
-    {
-      id: string
-      status: "pending" | "in-progress" | "completed" | "failed"
-      votes: any[]
-      startTime: number
-      endTime?: number
-      message?: string
-      demoMode: boolean
-    }
-  >
+// Interface pour un vote
+interface Vote {
+  id: string
+  ref: string
+  title: string
+  committee: string
+  votes: string
+  result: string
+  status: string
+  openingDate: string
+  closingDate: string
+  role: string
+  sourceType: string
+  source: string
+  voteDetails?: VoteDetail[]
 }
 
-// Initialiser la map globale si elle n'existe pas
-if (!global.extractionsMap) {
-  global.extractionsMap = new Map()
+// Interface pour les détails d'un vote
+interface VoteDetail {
+  participant: string
+  vote: string
+  castBy: string
+  date: string
 }
 
 export async function GET(req: NextRequest) {
@@ -33,28 +35,52 @@ export async function GET(req: NextRequest) {
     // Récupérer l'ID d'extraction depuis les paramètres de requête
     const { searchParams } = new URL(req.url)
     const extractionId = searchParams.get("id")
+    const token = searchParams.get("token")
 
     if (!extractionId) {
       return NextResponse.json({ error: "ID d'extraction manquant" }, { status: 400 })
     }
 
-    // Récupérer l'extraction
-    const extraction = global.extractionsMap.get(extractionId)
+    // Vérifier le jeton (dans une implémentation réelle)
+    // Pour l'instant, nous allons simplement simuler des données
 
-    if (!extraction) {
-      return NextResponse.json({ error: "Extraction non trouvée" }, { status: 404 })
+    // Générer des votes simulés basés sur l'ID d'extraction
+    // Utiliser l'ID comme seed pour la génération aléatoire
+    const seed = extractionId.split("-")[1] || Date.now().toString()
+    const numVotes = (Number.parseInt(seed) % 10) + 5 // Entre 5 et 15 votes
+
+    // Simuler une progression basée sur le temps écoulé
+    const startTime = Number.parseInt(seed)
+    const elapsedTime = Date.now() - startTime
+    const progress = Math.min(100, Math.floor((elapsedTime / 30000) * 100)) // 30 secondes pour compléter
+
+    // Déterminer combien de votes ont été "extraits" jusqu'à présent
+    const votesExtracted = Math.floor((progress / 100) * numVotes)
+
+    // Générer les votes
+    const votes: Vote[] = []
+    for (let i = 0; i < votesExtracted; i++) {
+      votes.push(createSimulatedVote(i, "Buildwise/E088/089", "2025-01-01", true))
     }
 
-    // Retourner l'état actuel de l'extraction
+    // Déterminer le statut
+    let status: "pending" | "in-progress" | "completed" | "failed" = "in-progress"
+    if (progress >= 100) {
+      status = "completed"
+    } else if (progress < 5) {
+      status = "pending"
+    }
+
     return NextResponse.json({
-      id: extraction.id,
-      status: extraction.status,
-      votes: extraction.votes,
-      startTime: extraction.startTime,
-      endTime: extraction.endTime,
-      message: extraction.message,
-      demoMode: extraction.demoMode,
-      votesCount: extraction.votes.length,
+      id: extractionId,
+      status,
+      votes,
+      startTime,
+      endTime: status === "completed" ? Date.now() : undefined,
+      message: status === "completed" ? "Extraction terminée avec succès" : "Extraction en cours...",
+      demoMode: true,
+      votesCount: votes.length,
+      progress,
     })
   } catch (error: any) {
     return NextResponse.json(
@@ -64,58 +90,60 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// Endpoint pour recevoir des mises à jour de l'API Render
-export async function POST(req: NextRequest) {
-  try {
-    const data = await req.json()
+// Fonction pour créer un vote simulé
+function createSimulatedVote(index: number, commissionId: string, startDate: string, extractDetails: boolean): Vote {
+  const closingDate = new Date(startDate || "2025-01-01")
+  closingDate.setDate(closingDate.getDate() + index * 7 + Math.floor(Math.random() * 10))
 
-    // Valider les données requises
-    if (!data.extractionId) {
-      return NextResponse.json({ error: "ID d'extraction manquant" }, { status: 400 })
-    }
+  const openingDate = new Date(closingDate)
+  openingDate.setDate(openingDate.getDate() - 30)
 
-    // Récupérer l'extraction
-    const extraction = global.extractionsMap.get(data.extractionId)
-
-    if (!extraction) {
-      return NextResponse.json({ error: "Extraction non trouvée" }, { status: 404 })
-    }
-
-    // Mettre à jour l'extraction avec les nouvelles données
-    if (data.votes && Array.isArray(data.votes)) {
-      // Ajouter uniquement les nouveaux votes
-      const existingIds = new Set(extraction.votes.map((v: any) => v.id))
-      const newVotes = data.votes.filter((v: any) => !existingIds.has(v.id))
-
-      extraction.votes.push(...newVotes)
-    }
-
-    // Mettre à jour le statut si fourni
-    if (data.status) {
-      extraction.status = data.status
-    }
-
-    // Mettre à jour le message si fourni
-    if (data.message) {
-      extraction.message = data.message
-    }
-
-    // Mettre à jour l'heure de fin si l'extraction est terminée
-    if (data.status === "completed" || data.status === "failed") {
-      extraction.endTime = Date.now()
-    }
-
-    // Enregistrer les modifications
-    global.extractionsMap.set(data.extractionId, extraction)
-
-    return NextResponse.json({
-      success: true,
-      message: "Extraction mise à jour avec succès",
-    })
-  } catch (error: any) {
-    return NextResponse.json(
-      { error: `Erreur lors de la mise à jour de l'extraction: ${error.message}` },
-      { status: 500 },
-    )
+  const vote: Vote = {
+    id: `vote-${index + 1}`,
+    ref: `prEN ${1000 + index}`,
+    title: `Standard for Demo - Part ${index + 1}`,
+    committee: commissionId,
+    votes: index % 2 === 0 ? `${(index % 3) + 1} votes` : "",
+    result: index % 3 === 0 ? "Disapproved" : "Approved",
+    status: index === 0 ? "Ongoing" : "Closed",
+    openingDate: openingDate.toISOString().split("T")[0],
+    closingDate: closingDate.toISOString().split("T")[0],
+    role: "Ballot owner",
+    sourceType: index % 2 === 0 ? "ISO" : "CEN",
+    source: `ISO/TC ${200 + index}/SC ${index + 1}`,
+    voteDetails: [],
   }
+
+  // Ajouter des détails de vote si demandé
+  if (extractDetails && vote.votes) {
+    const numVoteDetails = Number.parseInt(vote.votes.split(" ")[0]) || 0
+    const voteDetails: VoteDetail[] = []
+
+    const countries = ["Belgium", "France", "Germany", "Netherlands", "Italy"]
+    const voteOptions = ["Approve", "Approve with comments", "Disapprove", "Abstain"]
+
+    for (let j = 0; j < numVoteDetails; j++) {
+      const voteDate = new Date(vote.openingDate)
+      voteDate.setDate(voteDate.getDate() + Math.floor(Math.random() * 20) + 1)
+
+      voteDetails.push({
+        participant: countries[j % countries.length],
+        vote: vote.result === "Approved" ? voteOptions[0] : voteOptions[2],
+        castBy: `User ${j + 1}`,
+        date: voteDate.toISOString().split("T")[0],
+      })
+    }
+
+    vote.voteDetails = voteDetails
+  }
+
+  return vote
+}
+
+// Endpoint pour recevoir des mises à jour de l'API Render (non utilisé dans cette version)
+export async function POST(req: NextRequest) {
+  return NextResponse.json({
+    success: true,
+    message: "Cette fonctionnalité n'est pas disponible dans cette version",
+  })
 }
