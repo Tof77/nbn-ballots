@@ -55,17 +55,46 @@ export async function POST(req: NextRequest) {
 
     try {
       // Tester si l'API Render est accessible
-      console.log(`Ping de l'API Render: ${renderApiUrl}/api/ping`)
-      const pingResponse = await fetch(`${renderApiUrl}/api/ping`, {
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-          "Cache-Control": "no-cache, no-store, must-revalidate",
-        },
-        signal: AbortSignal.timeout(10000), // 10 secondes
-      })
+      // Essayer d'abord avec /ping (sans préfixe /api)
+      console.log(`Ping de l'API Render: ${renderApiUrl}/ping`)
+      let pingResponse
 
-      console.log(`Réponse du ping: ${pingResponse.status} ${pingResponse.statusText}`)
+      try {
+        pingResponse = await fetch(`${renderApiUrl}/ping`, {
+          method: "GET",
+          headers: {
+            Accept: "application/json",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+          },
+          signal: AbortSignal.timeout(10000), // 10 secondes
+        })
+
+        console.log(`Réponse du ping (sans /api): ${pingResponse.status} ${pingResponse.statusText}`)
+
+        // Si le ping échoue, essayer avec le chemin alternatif
+        if (!pingResponse.ok && pingResponse.status === 404) {
+          console.log("Tentative avec un chemin alternatif...")
+          pingResponse = await fetch(`${renderApiUrl}/`, {
+            method: "GET",
+            headers: {
+              Accept: "application/json",
+              "Cache-Control": "no-cache, no-store, must-revalidate",
+            },
+            signal: AbortSignal.timeout(10000), // 10 secondes
+          })
+          console.log(`Réponse du ping (racine): ${pingResponse.status} ${pingResponse.statusText}`)
+        }
+      } catch (error) {
+        console.error("Erreur lors du ping:", error)
+        return NextResponse.json(
+          {
+            error: `Erreur lors du ping du serveur d'extraction: ${error instanceof Error ? error.message : String(error)}`,
+            message:
+              "Impossible de communiquer avec le serveur d'extraction. Veuillez vérifier votre connexion et réessayer.",
+          },
+          { status: 500 },
+        )
+      }
 
       if (!pingResponse.ok) {
         console.log(`L'API Render a répondu avec un statut ${pingResponse.status}, erreur`)
@@ -74,19 +103,23 @@ export async function POST(req: NextRequest) {
             error: `Le serveur d'extraction n'est pas disponible (statut: ${pingResponse.status})`,
             message:
               "Le serveur d'extraction est actuellement indisponible. Veuillez réessayer plus tard ou contacter l'administrateur système.",
+            details: `Tentative d'accès à ${renderApiUrl}/ping a échoué avec le statut ${pingResponse.status}`,
           },
           { status: 503 },
         )
       }
 
       // Appeler l'API Render pour démarrer l'extraction
-      console.log(`Appel de l'API Render pour l'extraction: ${renderApiUrl}/extract-votes`)
+      // Essayer avec /api/extract-votes-stream qui est défini dans server.js
+      console.log(`Appel de l'API Render pour l'extraction: ${renderApiUrl}/api/extract-votes-stream`)
 
       // Préparer les données pour l'API Render
       const renderRequestData = {
         ...requestData,
         extractionId,
-        callbackUrl: process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000",
+        callbackUrl:
+          process.env.VERCEL_CALLBACK_URL ||
+          (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000"),
       }
 
       console.log("Données envoyées à l'API Render:", {
@@ -94,7 +127,7 @@ export async function POST(req: NextRequest) {
         credentials: "***HIDDEN***",
       })
 
-      const response = await fetch(`${renderApiUrl}/extract-votes`, {
+      const response = await fetch(`${renderApiUrl}/api/extract-votes-stream`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -108,11 +141,23 @@ export async function POST(req: NextRequest) {
 
       if (!response.ok) {
         console.log(`L'API Render a répondu avec une erreur ${response.status}, erreur`)
+
+        // Essayer de lire le corps de la réponse pour plus de détails
+        let errorDetails = ""
+        try {
+          const errorText = await response.text()
+          errorDetails = errorText.substring(0, 500) // Limiter la taille
+          console.log("Détails de l'erreur:", errorDetails)
+        } catch (e) {
+          console.error("Impossible de lire les détails de l'erreur:", e)
+        }
+
         return NextResponse.json(
           {
             error: `Erreur lors du démarrage de l'extraction (statut: ${response.status})`,
             message:
               "Une erreur s'est produite lors du démarrage de l'extraction. Veuillez réessayer ou contacter l'administrateur système.",
+            details: errorDetails,
           },
           { status: response.status },
         )
