@@ -76,11 +76,12 @@ function cleanupExtractionStore() {
   const now = Date.now()
   const MAX_AGE = 24 * 60 * 60 * 1000 // 24 heures
 
-  for (const [id, extraction] of extractionStore.entries()) {
+  // Utiliser Array.from pour convertir les entrées en tableau avant d'itérer
+  Array.from(extractionStore.entries()).forEach(([id, extraction]) => {
     if (now - extraction.startTime > MAX_AGE) {
       extractionStore.delete(id)
     }
-  }
+  })
 }
 
 // Route GET pour vérifier l'état d'une extraction
