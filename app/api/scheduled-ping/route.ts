@@ -3,6 +3,49 @@ import { NextResponse } from "next/server"
 export const runtime = "nodejs"
 export const maxDuration = 10
 
+// Fonction pour effectuer un ping avec timeout
+async function pingWithTimeout(
+  url: string,
+  timeout = 5000,
+): Promise<{
+  success: boolean
+  status?: number
+  statusText?: string
+  responseText?: string
+  error?: string
+}> {
+  try {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), timeout)
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        Pragma: "no-cache",
+        Expires: "0",
+      },
+      signal: controller.signal,
+    })
+
+    clearTimeout(timeoutId)
+
+    const responseText = await response.text()
+
+    return {
+      success: response.ok,
+      status: response.status,
+      statusText: response.statusText,
+      responseText: responseText.substring(0, 200),
+    }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
 export async function GET(request: Request) {
   try {
     // Récupérer l'URL de l'API Render depuis les variables d'environnement
@@ -21,41 +64,21 @@ export async function GET(request: Request) {
 
     console.log(`Ping programmé de l'API Render: ${pingUrl}`)
 
-    // Définir un timeout pour la requête
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 5000) // 5 secondes
+    // Effectuer le ping avec timeout
+    const pingResult = await pingWithTimeout(pingUrl)
 
-    try {
-      const response = await fetch(pingUrl, {
-        method: "GET",
-        headers: {
-          "Cache-Control": "no-cache, no-store, must-revalidate",
-          Pragma: "no-cache",
-          Expires: "0",
-        },
-        signal: controller.signal,
-      })
-
-      // Nettoyer le timeout
-      clearTimeout(timeoutId)
-
-      // Lire le corps de la réponse
-      const responseText = await response.text()
-
+    if (pingResult.success) {
       return NextResponse.json({
         success: true,
-        status: response.status,
-        statusText: response.statusText,
-        responseText: responseText.substring(0, 200),
+        status: pingResult.status,
+        statusText: pingResult.statusText,
+        responseText: pingResult.responseText,
         timestamp: new Date().toISOString(),
       })
-    } catch (error) {
-      // Nettoyer le timeout en cas d'erreur
-      clearTimeout(timeoutId)
-
+    } else {
       return NextResponse.json({
         success: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: pingResult.error || "Échec du ping",
         timestamp: new Date().toISOString(),
       })
     }
