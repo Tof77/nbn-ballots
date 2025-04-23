@@ -24,9 +24,8 @@ import {
   XCircleIcon,
   InfoIcon,
 } from "lucide-react"
-import { encryptCredentials } from "@/utils/encryption"
+import { encryptCredentials, decryptCredentials } from "@/utils/encryption"
 import { useRouter } from "next/navigation"
-import { JSEncrypt } from "jsencrypt"
 
 // Interface pour la réponse de l'API
 interface ApiResponse {
@@ -61,6 +60,14 @@ interface ExtractionStatus {
   startTime: number
   endTime?: number
   result?: any
+}
+
+// Interface pour les credentials
+interface Credentials {
+  encryptedUsername: string
+  encryptedPassword: string
+  username?: string // Ajouter ces propriétés comme optionnelles
+  password?: string // pour permettre leur ajout après le chiffrement
 }
 
 // Ajouter une nouvelle fonction pour réchauffer l'API Render avant l'extraction
@@ -202,11 +209,11 @@ interface VoteExtractionFormProps {
 }
 
 export default function VoteExtractionForm({ onResultsReceived }: VoteExtractionFormProps) {
-  const [username, setUsername] = useState("")
-  const [password, setPassword] = useState("")
   const [commissionId, setCommissionId] = useState("")
   const [startDate, setStartDate] = useState("")
   const [extractDetails, setExtractDetails] = useState(true)
+  const [username, setUsername] = useState("")
+  const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [publicKeyLoaded, setPublicKeyLoaded] = useState(false)
@@ -234,7 +241,6 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
   const [pollingInterval, setPollingInterval] = useState<number | null>(null)
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const router = useRouter()
-  const [publicKey, setPublicKey] = useState<string | null>(null)
 
   // Vérifier que la clé publique est disponible au chargement du composant
   useEffect(() => {
@@ -242,13 +248,7 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
       try {
         const response = await fetch("/api/public-key")
         if (response.ok) {
-          const data = await response.json()
-          if (data.publicKey) {
-            setPublicKey(data.publicKey)
-            setPublicKeyLoaded(true)
-          } else {
-            setError("Impossible de charger la clé publique pour le chiffrement")
-          }
+          setPublicKeyLoaded(true)
         } else {
           setError("Impossible de charger la clé publique pour le chiffrement")
         }
@@ -404,23 +404,6 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
     [onResultsReceived],
   )
 
-  // Ajouter cette fonction dans le composant VoteExtractionForm
-
-  // Fonction pour simuler le déchiffrement
-  function simulateDecryption(encryptedData: string): string {
-    try {
-      // Décodage base64 et vérification du préfixe "demo:"
-      const decoded = atob(encryptedData)
-      if (!decoded.startsWith("demo:")) {
-        throw new Error("Format de données invalide")
-      }
-      return decoded.substring(5) // Enlever le préfixe "demo:"
-    } catch (error: any) {
-      console.error("Erreur lors du déchiffrement simulé:", error)
-      throw new Error("Échec du déchiffrement des données")
-    }
-  }
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
@@ -437,22 +420,6 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
     }
 
     try {
-      if (!publicKey) {
-        setError("Clé publique non disponible")
-        setLoading(false)
-        return
-      }
-
-      // Chiffrer les identifiants
-      const encrypt = new JSEncrypt()
-      encrypt.setPublicKey(publicKey)
-      const encryptedUsername = encrypt.encrypt(username)
-      const encryptedPassword = encrypt.encrypt(password)
-
-      if (!encryptedUsername || !encryptedPassword) {
-        throw new Error("Échec du chiffrement des identifiants")
-      }
-
       // Réchauffer l'API Render avant de l'utiliser
       setDebugInfo("Réchauffement de l'API Render...")
       const warmupResult = await warmupRenderApi()
@@ -495,33 +462,32 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
       }
 
       // Chiffrer les identifiants avant de les envoyer
-      const { encryptedUsername: encryptedUsername2, encryptedPassword: encryptedPassword2 } = await encryptCredentials(
-        username,
-        password,
-      )
+      const { encryptedUsername, encryptedPassword } = await encryptCredentials(username, password)
+
+      // Préparer les credentials avec les types appropriés
+      const credentials: Credentials = {
+        encryptedUsername,
+        encryptedPassword,
+      }
+
+      // Ajouter les identifiants déchiffrés si nécessaire (pour le débogage)
+      try {
+        const { decryptedUsername, decryptedPassword } = await decryptCredentials(encryptedUsername, encryptedPassword)
+
+        // Ajouter les identifiants déchiffrés à la requête
+        credentials.username = decryptedUsername
+        credentials.password = decryptedPassword
+      } catch (error) {
+        console.error("Erreur lors du déchiffrement des identifiants:", error)
+        setDebugInfo((prev) => `${prev}\n\nErreur lors du déchiffrement des identifiants: ${error}`)
+      }
 
       // Préparer les données à envoyer
       const requestData = {
         commissionId,
         startDate,
         extractDetails,
-        credentials: {
-          encryptedUsername,
-          encryptedPassword,
-        },
-      }
-
-      // Ajouter les identifiants déchiffrés pour le débogage
-      try {
-        const decryptedUsername = simulateDecryption(encryptedUsername2)
-        const decryptedPassword = simulateDecryption(encryptedPassword2)
-
-        // Ajouter les identifiants déchiffrés à la requête
-        requestData.credentials.username = decryptedUsername
-        requestData.credentials.password = decryptedPassword
-      } catch (error) {
-        console.error("Erreur lors du déchiffrement des identifiants:", error)
-        // Continuer sans les identifiants déchiffrés
+        credentials,
       }
 
       // Journaliser les données envoyées (sans les identifiants sensibles)
@@ -530,6 +496,8 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
         credentials: {
           encryptedUsername: "***HIDDEN***",
           encryptedPassword: "***HIDDEN***",
+          username: "***HIDDEN***",
+          password: "***HIDDEN***",
         },
       }
 
