@@ -30,6 +30,19 @@ interface VoteDetail {
   date: string
 }
 
+// Map pour stocker temporairement les données d'extraction
+// Note: Cette map sera réinitialisée à chaque redéploiement ou redémarrage
+const extractionsCache = new Map<
+  string,
+  {
+    votes: Vote[]
+    lastUpdated: number
+    status: "pending" | "in-progress" | "completed" | "failed"
+    message?: string
+    demoMode: boolean
+  }
+>()
+
 export async function GET(req: NextRequest) {
   try {
     // Récupérer l'ID d'extraction depuis les paramètres de requête
@@ -41,11 +54,53 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "ID d'extraction manquant" }, { status: 400 })
     }
 
-    // Vérifier le jeton (dans une implémentation réelle)
-    // Pour l'instant, nous allons simplement simuler des données
+    console.log(`Récupération de l'extraction ${extractionId}`)
+
+    // Vérifier si nous avons des données en cache pour cette extraction
+    const cachedData = extractionsCache.get(extractionId)
+
+    if (cachedData) {
+      console.log(`Données en cache trouvées pour ${extractionId}`)
+
+      // Si l'extraction est en cours, simuler une progression
+      if (cachedData.status === "in-progress") {
+        const elapsedTime = Date.now() - cachedData.lastUpdated
+        const progress = Math.min(100, Math.floor((elapsedTime / 30000) * 100)) // 30 secondes pour compléter
+
+        // Si la progression atteint 100%, marquer comme terminée
+        if (progress >= 100 && cachedData.status !== "completed") {
+          cachedData.status = "completed"
+          cachedData.message = "Extraction terminée avec succès"
+          extractionsCache.set(extractionId, cachedData)
+        }
+
+        return NextResponse.json({
+          id: extractionId,
+          status: cachedData.status,
+          votes: cachedData.votes,
+          message: cachedData.message || "Extraction en cours...",
+          demoMode: cachedData.demoMode,
+          votesCount: cachedData.votes.length,
+          progress,
+        })
+      }
+
+      // Sinon, retourner les données telles quelles
+      return NextResponse.json({
+        id: extractionId,
+        status: cachedData.status,
+        votes: cachedData.votes,
+        message: cachedData.message,
+        demoMode: cachedData.demoMode,
+        votesCount: cachedData.votes.length,
+        progress: cachedData.status === "completed" ? 100 : 0,
+      })
+    }
+
+    // Si nous n'avons pas de données en cache, simuler des données
+    console.log(`Pas de données en cache pour ${extractionId}, simulation de données`)
 
     // Générer des votes simulés basés sur l'ID d'extraction
-    // Utiliser l'ID comme seed pour la génération aléatoire
     const seed = extractionId.split("-")[1] || Date.now().toString()
     const numVotes = (Number.parseInt(seed) % 10) + 5 // Entre 5 et 15 votes
 
@@ -71,6 +126,15 @@ export async function GET(req: NextRequest) {
       status = "pending"
     }
 
+    // Stocker les données en cache
+    extractionsCache.set(extractionId, {
+      votes,
+      lastUpdated: Date.now(),
+      status,
+      message: status === "completed" ? "Extraction terminée avec succès" : "Extraction en cours...",
+      demoMode: true,
+    })
+
     return NextResponse.json({
       id: extractionId,
       status,
@@ -83,6 +147,7 @@ export async function GET(req: NextRequest) {
       progress,
     })
   } catch (error: any) {
+    console.error("Erreur lors de la récupération de l'extraction:", error)
     return NextResponse.json(
       { error: `Erreur lors de la récupération de l'extraction: ${error.message}` },
       { status: 500 },
@@ -140,10 +205,60 @@ function createSimulatedVote(index: number, commissionId: string, startDate: str
   return vote
 }
 
-// Endpoint pour recevoir des mises à jour de l'API Render (non utilisé dans cette version)
+// Endpoint pour recevoir des mises à jour de l'API Render
 export async function POST(req: NextRequest) {
-  return NextResponse.json({
-    success: true,
-    message: "Cette fonctionnalité n'est pas disponible dans cette version",
-  })
+  try {
+    const data = await req.json()
+    console.log("Mise à jour reçue de l'API Render:", data)
+
+    // Valider les données requises
+    if (!data.extractionId) {
+      return NextResponse.json({ error: "ID d'extraction manquant" }, { status: 400 })
+    }
+
+    // Récupérer ou créer l'entrée dans le cache
+    const existingData = extractionsCache.get(data.extractionId) || {
+      votes: [],
+      lastUpdated: Date.now(),
+      status: "in-progress" as const,
+      demoMode: false,
+    }
+
+    // Mettre à jour l'extraction avec les nouvelles données
+    if (data.votes && Array.isArray(data.votes)) {
+      // Ajouter uniquement les nouveaux votes
+      const existingIds = new Set(existingData.votes.map((v: Vote) => v.id))
+      const newVotes = data.votes.filter((v: any) => !existingIds.has(v.id))
+
+      existingData.votes.push(...newVotes)
+      console.log(`Ajout de ${newVotes.length} nouveaux votes pour l'extraction ${data.extractionId}`)
+    }
+
+    // Mettre à jour le statut si fourni
+    if (data.status) {
+      existingData.status = data.status
+    }
+
+    // Mettre à jour le message si fourni
+    if (data.message) {
+      existingData.message = data.message
+    }
+
+    // Mettre à jour l'heure de dernière mise à jour
+    existingData.lastUpdated = Date.now()
+
+    // Enregistrer les modifications
+    extractionsCache.set(data.extractionId, existingData)
+
+    return NextResponse.json({
+      success: true,
+      message: "Extraction mise à jour avec succès",
+    })
+  } catch (error: any) {
+    console.error("Erreur lors de la mise à jour de l'extraction:", error)
+    return NextResponse.json(
+      { error: `Erreur lors de la mise à jour de l'extraction: ${error.message}` },
+      { status: 500 },
+    )
+  }
 }
