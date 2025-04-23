@@ -178,7 +178,7 @@ async function enhancedQuerySelector(page, selector, textContent) {
 }
 
 // Ajouter une fonction pour envoyer des mises à jour de progression
-async function updateExtractionProgress(extractionId, status, message, progress) {
+async function updateExtractionProgress(extractionId, status, message, progress, votes = null) {
   if (!extractionId) return
 
   try {
@@ -189,42 +189,55 @@ async function updateExtractionProgress(extractionId, status, message, progress)
       return
     }
 
+    // Préparer les données à envoyer
+    const updateData = {
+      extractionId,
+      status,
+      message,
+      progress,
+      timestamp: Date.now(),
+    }
+
+    // Ajouter les votes si disponibles
+    if (votes) {
+      updateData.votes = votes
+    }
+
     // Envoyer la mise à jour
-    const response = await fetch(`${callbackUrl}/api/extraction-progress`, {
+    console.log(`Envoi d'une mise à jour à ${callbackUrl}/api/extraction-stream`, updateData)
+    const response = await fetch(`${callbackUrl}/api/extraction-stream`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        extractionId,
-        status,
-        message,
-        progress,
-        timestamp: Date.now(),
-      }),
+      body: JSON.stringify(updateData),
     })
 
     if (!response.ok) {
       console.error(
         `Erreur lors de l'envoi de la mise à jour de progression: ${response.status} ${response.statusText}`,
       )
+    } else {
+      console.log("Mise à jour de progression envoyée avec succès")
     }
   } catch (error) {
     console.error("Erreur lors de l'envoi de la mise à jour de progression:", error)
   }
 }
 
-// Route principale pour l'extraction des votes
-app.post("/api/extract-votes", async (req, res) => {
-  console.log("Requête d'extraction reçue")
+// Route pour l'extraction des votes en streaming
+app.post("/api/extract-votes-stream", async (req, res) => {
+  console.log("Requête d'extraction en streaming reçue")
   let browser = null
   // Initialiser un tableau pour stocker les URLs des captures d'écran
   const screenshotUrls = []
   // Créer un ID de session unique pour regrouper les captures d'écran
   const sessionId = Date.now().toString()
+  // Tableau pour stocker les votes extraits
+  const extractedVotes = []
 
   try {
-    const { commissionId, startDate, extractDetails = true, credentials, extractionId } = req.body
+    const { commissionId, startDate, extractDetails = true, credentials, extractionId, callbackUrl } = req.body
 
     // Vérifier que les identifiants chiffrés sont fournis
     if (!credentials || !credentials.encryptedUsername || !credentials.encryptedPassword) {
@@ -232,6 +245,12 @@ app.post("/api/extract-votes", async (req, res) => {
       return res.status(400).json({
         error: "Identifiants chiffrés manquants",
       })
+    }
+
+    // Configurer l'URL de callback si fournie
+    if (callbackUrl) {
+      process.env.VERCEL_CALLBACK_URL = callbackUrl
+      console.log(`URL de callback configurée: ${callbackUrl}`)
     }
 
     let username, password
@@ -253,8 +272,14 @@ app.post("/api/extract-votes", async (req, res) => {
     const commissionCode = extractCommissionCode(commissionId)
     console.log("Code de commission extrait:", commissionCode)
 
+    // Envoyer une première mise à jour de progression
+    await updateExtractionProgress(extractionId, "in-progress", "Démarrage de l'extraction", 5)
+
     // Lancer Puppeteer pour l'extraction
     console.log("Lancement de Puppeteer...")
+
+    // Envoyer une mise à jour de progression
+    await updateExtractionProgress(extractionId, "in-progress", "Lancement du navigateur", 10)
 
     // Configuration de Puppeteer avec des options améliorées
     browser = await puppeteer.launch({
@@ -301,6 +326,8 @@ app.post("/api/extract-votes", async (req, res) => {
 
       // Naviguer directement vers la page principale d'ISO
       console.log("Navigation vers isolutions.iso.org...")
+      await updateExtractionProgress(extractionId, "in-progress", "Navigation vers isolutions.iso.org", 15)
+      
       await page.goto("https://isolutions.iso.org", {
         waitUntil: "networkidle2",
         timeout: 60000,
@@ -332,6 +359,7 @@ app.post("/api/extract-votes", async (req, res) => {
 
       if (isOnLoginPage) {
         console.log("Page de connexion détectée, tentative de connexion...")
+        await updateExtractionProgress(extractionId, "in-progress", "Connexion en cours", 20)
 
         // Prendre une capture d'écran de la page de connexion
         const loginScreenshotPath = path.join(screenshotsDir, `${sessionId}-login-page.png`)
@@ -462,6 +490,7 @@ app.post("/api/extract-votes", async (req, res) => {
 
       // Naviguer directement vers la page de recherche des votes
       console.log("Navigation vers la page de recherche des votes...")
+      await updateExtractionProgress(extractionId, "in-progress", "Navigation vers la page de recherche des votes", 35)
 
       // Utiliser une approche plus robuste pour la navigation
       try {
@@ -727,6 +756,21 @@ app.post("/api/extract-votes", async (req, res) => {
           })
 
         console.log(`${votes.length} votes extraits`)
+        
+        // Envoyer les votes extraits au client
+        if (votes.length > 0) {
+          // Ajouter les votes au tableau des votes extraits
+          extractedVotes.push(...votes)
+          
+          // Envoyer une mise à jour avec les votes extraits
+          await updateExtractionProgress(
+            extractionId, 
+            "in-progress", 
+            `${votes.length} votes extraits`, 
+            65,
+            votes
+          )
+        }
 
         // Extraire les détails des votes si demandé
         if (extractDetails && votes.length > 0) {
@@ -754,7 +798,7 @@ app.post("/api/extract-votes", async (req, res) => {
                 extractionId,
                 "in-progress",
                 `Extraction des votes: ${i + 1}/${totalVotes}`,
-                60 + ((i + 1) / totalVotes) * 30,
+                65 + ((i + 1) / totalVotes) * 30,
               )
 
               try {
@@ -973,6 +1017,15 @@ app.post("/api/extract-votes", async (req, res) => {
                 }
 
                 console.log(`${vote.voteDetails.length} détails extraits pour le vote ${vote.ref}`)
+                
+                // Envoyer une mise à jour avec le vote et ses détails
+                await updateExtractionProgress(
+                  extractionId,
+                  "in-progress",
+                  `Détails extraits pour le vote ${i + 1}/${totalVotes}`,
+                  65 + ((i + 1) / totalVotes) * 30,
+                  [vote]
+                )
               } catch (error) {
                 console.error(`Erreur lors de l'extraction des détails pour le vote ${vote.ref}:`, error)
                 vote.voteDetails = []
@@ -1005,13 +1058,13 @@ app.post("/api/extract-votes", async (req, res) => {
 
         // Retourner les résultats avec les URLs des captures d'écran
         return res.json({
-          votes,
+          votes: extractedVotes,
           debug: {
             receivedCommissionId: commissionId,
             extractedCommissionCode: commissionCode,
             username: username,
             startDate: startDate,
-            numVotesGenerated: votes.length,
+            numVotesGenerated: extractedVotes.length,
             sessionId: sessionId,
             screenshotUrls: screenshotUrls,
           },
@@ -1490,13 +1543,15 @@ app.post("/api/extract-votes", async (req, res) => {
                     }
                   } else if (header.includes("committee")) {
                     rowData.committee = text
+                  } else if (header.includes("  {
+                    rowData.committee = text
                   } else if (header.includes("vote")) {
                     rowData.votes = text
                   } else if (header.includes("result")) {
                     rowData.result = text
                   } else if (header.includes("status")) {
                     rowData.status = text
-                  } else if (header.includes("opening")) {
+                  } else if (header.includes("opening")) {\
                     rowData.openingDate = text
                   } else if (header.includes("closing")) {
                     rowData.closingDate = text
@@ -1524,26 +1579,40 @@ app.post("/api/extract-votes", async (req, res) => {
               })
               .filter(Boolean) // Filtrer les lignes nulles
           })
-          .catch((e) => {
+          .catch((e) => 
             console.log(`Erreur lors de l'extraction alternative des résultats: ${e.message}`)
-            return []
-          })
+            return [])
 
-        console.log(`${votes.length} votes extraits par méthode alternative`)
+        console.log(`$votes.lengthvotes extraits par méthode alternative`)
+        
+        // Ajouter les votes au tableau des votes extraits
+        extractedVotes.push(...votes)
+        
+        // Envoyer une mise à jour avec les votes extraits
+        await updateExtractionProgress(
+          extractionId, 
+          "in-progress", 
+          `$votes.lengthvotes extraits (méthode alternative)`, 
+          80,
+          votes
+        )
 
         // Fermer le navigateur
         await browser.close()
         browser = null
+        
+        // Marquer l'extraction comme terminée
+        await updateExtractionProgress(extractionId, "completed", "Extraction terminée", 100)
 
         // Retourner les résultats avec les URLs des captures d'écran
         return res.json({
-          votes,
+          votes: extractedVotes,
           debug: {
             receivedCommissionId: commissionId,
             extractedCommissionCode: commissionCode,
             username: username,
             startDate: startDate,
-            numVotesGenerated: votes.length,
+            numVotesGenerated: extractedVotes.length,
             alternativeMethod: true,
             sessionId: sessionId,
             screenshotUrls: screenshotUrls,
@@ -1558,6 +1627,9 @@ app.post("/api/extract-votes", async (req, res) => {
         await browser.close()
         browser = null
       }
+      
+      // Marquer l'extraction comme échouée
+      await updateExtractionProgress(extractionId, "failed", `Erreur: $error.message`, 0)
 
       return res.status(500).json({
         error: "Erreur lors de l'extraction des votes",
@@ -1573,6 +1645,11 @@ app.post("/api/extract-votes", async (req, res) => {
       await browser.close()
       browser = null
     }
+    
+    // Marquer l'extraction comme échouée
+    if (extractionId) {
+      await updateExtractionProgress(extractionId, "failed", `Erreur générale: $error.message`, 0)
+    }
 
     return res.status(500).json({
       error: "Erreur lors de l'extraction des votes",
@@ -1584,5 +1661,5 @@ app.post("/api/extract-votes", async (req, res) => {
 
 // Démarrer le serveur
 app.listen(port, () => {
-  console.log(`API NBN Ballots en écoute sur le port ${port}`)
+  console.log(`API NBN Ballots en écoute sur le port $port`)
 })
