@@ -70,7 +70,7 @@ export async function GET(req: NextRequest) {
         const progress = Math.min(100, Math.floor((elapsedTime / 30000) * 100)) // 30 secondes pour compléter
 
         // Si la progression atteint 100%, marquer comme terminée
-        if (progress >= 100 && cachedData.status !== "completed") {
+        if (progress >= 100) {
           cachedData.status = "completed"
           cachedData.message = "Extraction terminée avec succès"
           extractionsCache.set(extractionId, cachedData)
