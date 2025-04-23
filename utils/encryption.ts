@@ -33,6 +33,21 @@ export async function simulateEncryption(text: string): Promise<string> {
   return btoa(`demo:${text}`)
 }
 
+// Cette fonction déchiffre les données simulées
+export function simulateDecryption(encryptedData: string): string {
+  try {
+    // Décodage base64 et vérification du préfixe "demo:"
+    const decoded = atob(encryptedData)
+    if (!decoded.startsWith("demo:")) {
+      throw new Error("Format de données invalide")
+    }
+    return decoded.substring(5) // Enlever le préfixe "demo:"
+  } catch (error: any) {
+    console.error("Erreur lors du déchiffrement simulé:", error)
+    throw new Error("Échec du déchiffrement des données")
+  }
+}
+
 // Cette fonction chiffre les identifiants pour l'API
 export async function encryptCredentials(
   username: string,
