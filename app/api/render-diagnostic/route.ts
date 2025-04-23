@@ -3,6 +3,52 @@ import { NextResponse } from "next/server"
 export const runtime = "edge"
 export const maxDuration = 30
 
+// Fonction pour tester un endpoint
+async function testEndpoint(url: string): Promise<{
+  path: string
+  url: string
+  status?: number
+  statusText?: string
+  ok?: boolean
+  responseBody?: string
+  error?: string
+}> {
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+      },
+      signal: AbortSignal.timeout(5000), // 5 secondes
+    })
+
+    let responseBody = ""
+    try {
+      // Essayer de lire le corps de la réponse
+      responseBody = await response.text()
+      responseBody = responseBody.substring(0, 200) // Limiter la taille
+    } catch (e) {
+      responseBody = `Erreur lors de la lecture du corps: ${e instanceof Error ? e.message : String(e)}`
+    }
+
+    return {
+      path: new URL(url).pathname,
+      url,
+      status: response.status,
+      statusText: response.statusText,
+      ok: response.ok,
+      responseBody,
+    }
+  } catch (error) {
+    return {
+      path: new URL(url).pathname,
+      url,
+      error: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
 export async function GET() {
   const diagnostics: any[] = []
   const startTime = Date.now()
@@ -20,45 +66,17 @@ export async function GET() {
     // Tester différents chemins d'API
     const pathsToTest = ["/", "/ping", "/api/ping", "/api/extract-votes", "/api/extract-votes-stream", "/screenshots"]
 
-    for (const path of pathsToTest) {
-      const fullUrl = `${renderApiUrl}${path}`
-      console.log(`Test de l'endpoint: ${fullUrl}`)
+    // Tester tous les endpoints en parallèle
+    const testResults = await Promise.all(
+      pathsToTest.map((path) => {
+        const fullUrl = `${renderApiUrl}${path}`
+        console.log(`Test de l'endpoint: ${fullUrl}`)
+        return testEndpoint(fullUrl)
+      }),
+    )
 
-      try {
-        const response = await fetch(fullUrl, {
-          method: "GET",
-          headers: {
-            Accept: "application/json",
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-          },
-          signal: AbortSignal.timeout(5000), // 5 secondes
-        })
-
-        let responseBody = ""
-        try {
-          // Essayer de lire le corps de la réponse
-          responseBody = await response.text()
-          responseBody = responseBody.substring(0, 200) // Limiter la taille
-        } catch (e) {
-          responseBody = `Erreur lors de la lecture du corps: ${e instanceof Error ? e.message : String(e)}`
-        }
-
-        diagnostics.push({
-          path,
-          url: fullUrl,
-          status: response.status,
-          statusText: response.statusText,
-          ok: response.ok,
-          responseBody,
-        })
-      } catch (error) {
-        diagnostics.push({
-          path,
-          url: fullUrl,
-          error: error instanceof Error ? error.message : String(error),
-        })
-      }
-    }
+    // Ajouter les résultats au diagnostic
+    diagnostics.push(...testResults)
 
     // Vérifier les variables d'environnement
     const envVars = {
