@@ -40,6 +40,7 @@ export default function StreamingExtractionForm({
   const [demoMode, setDemoMode] = useState(false)
   const [extractionId, setExtractionId] = useState<string | null>(null)
   const [votesReceived, setVotesReceived] = useState(0)
+  const [progress, setProgress] = useState(0)
 
   // Vérifier que la clé publique est disponible au chargement du composant
   useEffect(() => {
@@ -65,6 +66,7 @@ export default function StreamingExtractionForm({
 
     const pollInterval = setInterval(async () => {
       try {
+        // Ajouter le token à la requête
         const response = await fetch(`/api/extraction-stream?id=${extractionId}`, {
           headers: {
             "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -93,6 +95,11 @@ export default function StreamingExtractionForm({
           })
 
           setDebugInfo((prev) => `${prev || ""}\nReçu ${newVotes.length} nouveaux votes (total: ${data.votes.length})`)
+        }
+
+        // Mettre à jour la progression si disponible
+        if (data.progress !== undefined) {
+          setProgress(data.progress)
         }
 
         // Si l'extraction est terminée
@@ -370,6 +377,15 @@ export default function StreamingExtractionForm({
                     : "En attente des premiers résultats..."}
                 </p>
               </div>
+            </div>
+            <div className="mt-2">
+              <div className="w-full bg-blue-200 rounded-full h-2.5">
+                <div
+                  className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
+                  style={{ width: `${progress}%` }}
+                ></div>
+              </div>
+              <p className="text-xs text-right mt-1 text-blue-600">{progress}%</p>
             </div>
             <div className="mt-2 text-xs text-blue-600">
               Les résultats s'affichent au fur et à mesure de l'extraction
