@@ -365,7 +365,20 @@ export default function StreamingExtractionForm({
       }
     } catch (error: any) {
       console.error("Erreur lors de l'extraction:", error)
-      setError(error.message || "Une erreur est survenue")
+      if (
+        error.message &&
+        (error.message.includes("Échec de la connexion") ||
+          error.message.includes("identifiants") ||
+          error.message.toLowerCase().includes("login") ||
+          error.message.toLowerCase().includes("authentication"))
+      ) {
+        setError("Échec de l'authentification. Veuillez vérifier vos identifiants ISO et réessayer.")
+        setDebugInfo(
+          (prev) => `${prev || ""}\n\nErreur d'authentification détectée. Veuillez vérifier vos identifiants ISO.`,
+        )
+      } else {
+        setError(error.message || "Une erreur est survenue")
+      }
       setLoading(false)
       onError(error.message || "Une erreur est survenue")
     }
@@ -640,7 +653,7 @@ export default function StreamingExtractionForm({
           >
             {isWarmingUp ? (
               <span className="flex items-center gap-1">
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Loader2 className="h-3 w-3 animate-spin" />
                 Vérification...
               </span>
             ) : (
