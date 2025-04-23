@@ -25,6 +25,7 @@ import {
   InfoIcon,
 } from "lucide-react"
 import { encryptCredentials } from "@/utils/encryption"
+import { useRouter } from "next/navigation"
 
 // Interface pour la réponse de l'API
 interface ApiResponse {
@@ -206,7 +207,7 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState("")
+  const [error, setError] = useState<string | null>(null)
   const [publicKeyLoaded, setPublicKeyLoaded] = useState(false)
   const [debugInfo, setDebugInfo] = useState<string | null>(null)
   const [showDebug, setShowDebug] = useState(false)
@@ -231,6 +232,7 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
   const [extractionStatus, setExtractionStatus] = useState<ExtractionStatus | null>(null)
   const [pollingInterval, setPollingInterval] = useState<number | null>(null)
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const router = useRouter()
 
   // Vérifier que la clé publique est disponible au chargement du composant
   useEffect(() => {
