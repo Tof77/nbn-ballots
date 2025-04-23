@@ -909,9 +909,8 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error("Erreur lors de l'extraction des votes:", error)
 
-    if (browser) {
-      await browser.close()
-    }
+    // Le navigateur n'est plus utilisé dans cette version, supprimons cette vérification
+    // qui cause une erreur de type
 
     return NextResponse.json(
       {
