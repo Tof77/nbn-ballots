@@ -12,7 +12,6 @@ interface ScreenshotInfo {
 
 export default function Home() {
   const [results, setResults] = useState<any[]>([])
-  const [demoMode, setDemoMode] = useState(false)
   const [screenshotUrls, setScreenshotUrls] = useState<ScreenshotInfo[]>([])
   const [useStreamingExtraction, setUseStreamingExtraction] = useState(true)
 
@@ -35,15 +34,14 @@ export default function Home() {
   }
 
   // Fonction pour gérer la fin de l'extraction
-  const handleExtractionComplete = (isDemoMode: boolean) => {
-    setDemoMode(isDemoMode)
+  const handleExtractionComplete = () => {
+    // Rien à faire ici maintenant que nous avons supprimé le mode démo
   }
 
   // Fonction pour gérer le début de l'extraction
   const handleExtractionStart = () => {
     // Réinitialiser les résultats
     setResults([])
-    setDemoMode(false)
     setScreenshotUrls([])
   }
 
@@ -53,9 +51,8 @@ export default function Home() {
   }
 
   // Fonction pour gérer les résultats de l'extraction standard
-  const handleResultsReceived = (newResults: any[], isDemoMode = false, screenshots: ScreenshotInfo[] = []) => {
+  const handleResultsReceived = (newResults: any[], screenshots: ScreenshotInfo[] = []) => {
     setResults(newResults)
-    setDemoMode(isDemoMode)
     setScreenshotUrls(screenshots)
   }
 
@@ -90,7 +87,7 @@ export default function Home() {
           <VoteExtractionForm onResultsReceived={handleResultsReceived} />
         )}
 
-        {results.length > 0 && <ResultsDisplay results={results} demoMode={demoMode} screenshotUrls={screenshotUrls} />}
+        {results.length > 0 && <ResultsDisplay results={results} screenshotUrls={screenshotUrls} />}
       </div>
     </div>
   )
