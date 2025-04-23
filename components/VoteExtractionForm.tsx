@@ -13,7 +13,6 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
   Loader2,
   ShieldIcon,
-  BugIcon,
   WifiIcon,
   WifiOffIcon,
   ClockIcon,
@@ -197,7 +196,7 @@ interface ScreenshotInfo {
 }
 
 interface VoteExtractionFormProps {
-  onResultsReceived: (results: any[], isDemoMode?: boolean, screenshots?: ScreenshotInfo[]) => void
+  onResultsReceived: (results: any[], screenshots?: ScreenshotInfo[]) => void
 }
 
 export default function VoteExtractionForm({ onResultsReceived }: VoteExtractionFormProps) {
@@ -223,7 +222,6 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
     statusCode: 0,
   })
   const [isWarmingUp, setIsWarmingUp] = useState(false)
-  const [demoMode, setDemoMode] = useState(false)
   const [showErrorDetails, setShowErrorDetails] = useState(false)
   const [retryCount, setRetryCount] = useState(0)
   const [autoRetry, setAutoRetry] = useState(false)
@@ -380,9 +378,8 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
 
           // Si l'extraction est terminée avec succès, traiter les résultats
           if (status.status === "completed" && status.result) {
-            const isDemoMode = !!status.result.debug?.demoMode
             const screenshots = status.result.debug?.screenshotUrls || []
-            onResultsReceived(status.result.votes || [], isDemoMode, screenshots)
+            onResultsReceived(status.result.votes || [], screenshots)
             setLoading(false)
           } else if (status.status === "failed") {
             setError(status.message || "L'extraction a échoué")
@@ -402,7 +399,6 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
     setLoading(true)
     setError("")
     setDebugInfo(null)
-    setDemoMode(false)
     setExtractionId(null)
     setExtractionStatus(null)
 
@@ -441,10 +437,12 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
           `${prev}\n\nRéchauffement de l'API Render: ${warmupResult.success ? "Succès" : "Échec"} - ${warmupResult.message}`,
       )
 
-      // Si le service est en maintenance, proposer d'utiliser le mode démo
-      if (isMaintenanceMode) {
-        setDebugInfo((prev) => `${prev}\n\nService Render en maintenance (503). Utilisation du mode démo recommandée.`)
-        setDemoMode(true)
+      // Si le service est en maintenance ou inactif, afficher une erreur
+      if (isMaintenanceMode || !warmupResult.success) {
+        setDebugInfo((prev) => `${prev}\n\nService Render indisponible. Impossible de continuer.`)
+        setError("Le service d'extraction est actuellement indisponible. Veuillez réessayer plus tard.")
+        setLoading(false)
+        return
       }
 
       // Attendre un peu après le réchauffement
@@ -465,8 +463,6 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
           encryptedUsername,
           encryptedPassword,
         },
-        // Ajouter un indicateur de mode démo si le service est en maintenance
-        forceDemoMode: isMaintenanceMode || demoMode,
       }
 
       // Journaliser les données envoyées (sans les identifiants sensibles)
@@ -482,22 +478,11 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
       setDebugInfo((prev) => `${prev}\n\nDonnées envoyées à l'API: ${JSON.stringify(debugRequestData, null, 2)}`)
 
       // Utiliser directement l'API sans passer par le middleware pour le débogage
-      const apiUrl = "/api/extract-votes"
+      const apiUrl = "/api/extraction-start"
 
       // Ajouter des logs pour le débogage
       console.log("URL de l'API utilisée:", apiUrl)
       setDebugInfo((prev) => `${prev}\n\nURL de l'API utilisée: ${apiUrl}`)
-
-      try {
-        // Tester d'abord avec une requête GET à l'API de test
-        const testResponse = await fetch("/api/test")
-        const testText = await testResponse.text()
-        console.log("Test API response:", testText)
-        setDebugInfo((prev) => `${prev}\n\nTest API response: ${testText}`)
-      } catch (testError: unknown) {
-        console.error("Erreur lors du test de l'API:", testError)
-        setDebugInfo((prev) => `${prev}\n\nErreur lors du test de l'API: ${testError}`)
-      }
 
       // Démarrer l'extraction
       try {
@@ -535,12 +520,6 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
             setLoading(true) // Maintenir l'état de chargement pendant le polling
 
             // Le polling sera démarré par l'effet useEffect
-          } else if (json.votes) {
-            // Si nous avons directement les votes (mode démo), traiter les résultats
-            const isDemoMode = !!json.debug?.demoMode
-            const screenshots = json.debug?.screenshotUrls || []
-            onResultsReceived(json.votes || [], isDemoMode, screenshots)
-            setLoading(false)
           } else if (json.error) {
             setError(json.error || "Une erreur est survenue")
             setLoading(false)
@@ -553,12 +532,6 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
               message: json.renderApiMessage || `API Render ${json.renderApiStatus}`,
               lastChecked: new Date(),
             })
-          }
-
-          if (json.debug?.demoMode) {
-            setDemoMode(true)
-            console.log("Mode démonstration activé")
-            setDebugInfo((prev) => `${prev}\n\nMode démonstration activé - Utilisation de données simulées`)
           }
 
           // Check for error response
@@ -600,10 +573,6 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
           setError(
             "L'opération a expiré. L'extraction des votes prend trop de temps. Essayez de réduire la plage de dates ou de désactiver l'extraction des détails des votes.",
           )
-
-          // Activer automatiquement le mode démo en cas de timeout
-          setDemoMode(true)
-          onResultsReceived([], true)
         } else {
           // Autres erreurs
           setDebugInfo(
@@ -611,7 +580,6 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
               `${prev}\n\nErreur lors de l'extraction: ${error instanceof Error ? error.message : String(error)}`,
           )
           setError(error instanceof Error ? error.message : String(error) || "Une erreur est survenue")
-          onResultsReceived([])
         }
 
         setLoading(false)
@@ -619,7 +587,6 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
     } catch (err: any) {
       console.error("Erreur lors de l'extraction:", err)
       setError(err.message || "Une erreur est survenue")
-      onResultsReceived([])
       setLoading(false)
     }
   }
@@ -769,8 +736,7 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
                     <p className="font-medium">Note sur l'erreur 503:</p>
                     <p>
                       Cette erreur indique que le service Render est temporairement indisponible. Cela peut être dû à
-                      une maintenance planifiée, une surcharge du service, ou des limitations de votre plan Render. Vous
-                      pouvez continuer en mode démo pendant ce temps.
+                      une maintenance planifiée, une surcharge du service, ou des limitations de votre plan Render.
                     </p>
                   </div>
                 )}
@@ -849,9 +815,6 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
 
         {extractionStatus.status === "failed" && (
           <div className="mt-2">
-            <Button variant="outline" size="sm" onClick={() => setDemoMode(true)} className="mr-2">
-              Utiliser le mode démo
-            </Button>
             <Button variant="outline" size="sm" onClick={() => handleSubmit(new Event("submit") as any)}>
               Réessayer
             </Button>
@@ -897,30 +860,14 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
           </AlertTitle>
           <AlertDescription>
             <p>
-              L'API Render est actuellement en maintenance ou temporairement indisponible (erreur 503). Vous pouvez
-              continuer en mode démo ou réessayer plus tard.
+              L'API Render est actuellement en maintenance ou temporairement indisponible (erreur 503). Veuillez
+              réessayer plus tard.
             </p>
             <div className="mt-2">
-              <Button variant="outline" size="sm" onClick={() => setDemoMode(true)} className="mr-2">
-                Utiliser le mode démo
-              </Button>
               <Button variant="outline" size="sm" onClick={checkRenderApiStatus}>
                 Vérifier à nouveau
               </Button>
             </div>
-          </AlertDescription>
-        </Alert>
-      )}
-
-      {demoMode && (
-        <Alert className="mb-4 bg-blue-50 border-blue-200 text-blue-800">
-          <AlertTitle className="flex items-center gap-2">
-            <BugIcon className="h-4 w-4" />
-            Mode Démonstration
-          </AlertTitle>
-          <AlertDescription>
-            L'application fonctionne actuellement en mode démonstration avec des données simulées. Les données affichées
-            ne proviennent pas d'isolutions.iso.org.
           </AlertDescription>
         </Alert>
       )}
@@ -1055,18 +1002,6 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
           </Label>
         </div>
 
-        <div className="flex items-center space-x-2">
-          <Checkbox
-            id="forceDemoMode"
-            checked={demoMode}
-            onCheckedChange={(checked) => setDemoMode(checked === true)}
-            disabled={loading}
-          />
-          <Label htmlFor="forceDemoMode" className="text-sm text-gray-700">
-            Utiliser le mode démo (données simulées)
-          </Label>
-        </div>
-
         {error && (
           <Alert variant="destructive">
             <AlertDescription>{error}</AlertDescription>
@@ -1156,7 +1091,7 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
           onClick={() => setShowDebug(!showDebug)}
           className="flex items-center gap-1"
         >
-          <BugIcon className="h-4 w-4" />
+          <InfoIcon className="h-4 w-4" />
           {showDebug ? "Masquer le débogage" : "Afficher le débogage"}
         </Button>
       </div>
