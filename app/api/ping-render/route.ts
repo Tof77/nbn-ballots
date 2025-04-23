@@ -15,48 +15,90 @@ export async function GET(request: Request) {
       })
     }
 
-    // Ajouter un paramètre de cache-buster pour éviter les réponses en cache
-    const timestamp = new Date().getTime()
-    const pingUrl = `${renderApiUrl}/ping?cache=${timestamp}`
+    // Modifier la fonction pour essayer différentes routes de ping
 
-    console.log(`Ping de l'API Render: ${pingUrl}`)
+    // Remplacer la partie qui construit l'URL de ping par ceci:
+    const pingUrl = `${renderApiUrl}/ping`
+    const alternatePingUrl = `${renderApiUrl}/api/ping`
+    const rootUrl = renderApiUrl
 
-    // Définir un timeout pour la requête
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 5000) // 5 secondes
+    console.log(`Tentative de ping sur plusieurs URLs:
+1. ${pingUrl}
+2. ${alternatePingUrl}
+3. ${rootUrl}`)
 
-    try {
-      const response = await fetch(pingUrl, {
-        method: "GET",
-        headers: {
-          "Cache-Control": "no-cache, no-store, must-revalidate",
-          Pragma: "no-cache",
-          Expires: "0",
-        },
-        signal: controller.signal,
-      })
+    // Fonction pour tenter un ping sur une URL spécifique
+    async function attemptPing(url, label) {
+      try {
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 5000) // 5 secondes
 
-      // Nettoyer le timeout
-      clearTimeout(timeoutId)
+        const response = await fetch(url, {
+          method: "GET",
+          headers: {
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            Pragma: "no-cache",
+            Expires: "0",
+          },
+          signal: controller.signal,
+        })
 
-      // Lire le corps de la réponse
-      const responseText = await response.text()
+        // Nettoyer le timeout
+        clearTimeout(timeoutId)
 
+        // Lire le corps de la réponse
+        const responseText = await response.text()
+
+        console.log(`Ping ${label} - Statut: ${response.status}`)
+
+        return {
+          success: response.ok,
+          status: response.status,
+          statusText: response.statusText,
+          responseText: responseText.substring(0, 200),
+          url: url,
+        }
+      } catch (error) {
+        console.error(`Erreur lors du ping ${label}:`, error)
+        return {
+          success: false,
+          status: "error",
+          error: error instanceof Error ? error.message : String(error),
+          url: url,
+        }
+      }
+    }
+
+    // Tenter les pings sur toutes les URLs
+    const results = await Promise.all([
+      attemptPing(pingUrl, "URL standard"),
+      attemptPing(alternatePingUrl, "URL alternative"),
+      attemptPing(rootUrl, "URL racine"),
+    ])
+
+    // Trouver le premier ping réussi
+    const successfulPing = results.find((result) => result.success)
+
+    if (successfulPing) {
       return NextResponse.json({
         success: true,
-        status: response.status,
-        statusText: response.statusText,
-        responseText: responseText.substring(0, 200),
+        status: successfulPing.status,
+        statusText: successfulPing.statusText,
+        responseText: successfulPing.responseText,
         timestamp: new Date().toISOString(),
+        message: `API Render disponible via ${successfulPing.url}`,
+        statusMessage: "active",
+        allResults: results,
       })
-    } catch (error) {
-      // Nettoyer le timeout en cas d'erreur
-      clearTimeout(timeoutId)
-
+    } else {
+      // Aucun ping n'a réussi
       return NextResponse.json({
         success: false,
-        error: error instanceof Error ? error.message : String(error),
+        status: "inactive",
         timestamp: new Date().toISOString(),
+        message: "API Render non disponible sur toutes les URLs testées",
+        statusMessage: "inactive",
+        allResults: results,
       })
     }
   } catch (error) {
