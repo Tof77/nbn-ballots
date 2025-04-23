@@ -222,9 +222,11 @@ app.post("/api/extract-votes-stream", async (req, res) => {
   const sessionId = Date.now().toString()
   // Tableau pour stocker les votes extraits
   const extractedVotes = []
+  let extractionId // Déclaration de la variable extractionId
 
   try {
-    const { commissionId, startDate, extractDetails = true, credentials, extractionId, callbackUrl } = req.body
+    const { commissionId, startDate, extractDetails = true, credentials, callbackUrl } = req.body
+    extractionId = req.body.extractionId // Assignation de la valeur à extractionId
 
     // Vérifier que les identifiants chiffrés sont fournis
     if (!credentials || !credentials.encryptedUsername || !credentials.encryptedPassword) {
