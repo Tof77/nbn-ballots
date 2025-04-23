@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
-import puppeteer from "puppeteer"
+import puppeteer from "puppeteer-core"
+import chromium from "@sparticuz/chromium"
 import path from "path"
 import fs from "fs"
 import os from "os"
@@ -29,10 +30,16 @@ export async function POST(request: Request) {
       )
     }
 
-    // Lancer Puppeteer pour tester la connexion
+    // Configurer Puppeteer avec Chromium
+    const executablePath = await chromium.executablePath()
+
+    // Lancer Puppeteer
     browser = await puppeteer.launch({
+      args: [...chromium.args, "--hide-scrollbars", "--disable-web-security"],
+      defaultViewport: chromium.defaultViewport,
+      executablePath,
       headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+      ignoreHTTPSErrors: true,
     })
 
     const page = await browser.newPage()
