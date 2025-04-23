@@ -6,20 +6,6 @@ export const runtime = "nodejs"
 // Définir la durée maximale d'exécution à 60 secondes
 export const maxDuration = 60
 
-// Map pour stocker les extractions en cours
-const extractionsMap = new Map<
-  string,
-  {
-    id: string
-    status: "pending" | "in-progress" | "completed" | "failed"
-    votes: any[]
-    startTime: number
-    endTime?: number
-    message?: string
-    demoMode: boolean
-  }
->()
-
 // Fonction pour générer un ID unique
 function generateExtractionId(): string {
   return `extract-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`
@@ -40,12 +26,20 @@ function simulateDecryption(encryptedData: string): string {
   }
 }
 
-// Modifier la fonction pour retourner directement les données simulées au lieu de les stocker dans une map globale
+// Fonction pour générer un jeton simple
+function generateToken(extractionId: string): string {
+  // Dans une implémentation réelle, vous utiliseriez une bibliothèque comme jsonwebtoken
+  // Pour l'instant, utilisons une méthode simple
+  return Buffer.from(`${extractionId}:${Date.now()}:secret-key`).toString("base64")
+}
 
-// Remplacer la fonction POST pour qu'elle retourne immédiatement des données simulées
 export async function POST(req: NextRequest) {
   try {
     const requestData = await req.json()
+    console.log("Démarrage de l'extraction avec les paramètres:", {
+      ...requestData,
+      credentials: requestData.credentials ? "***HIDDEN***" : undefined,
+    })
 
     // Valider les données requises
     if (!requestData.commissionId || !requestData.startDate || !requestData.credentials) {
@@ -57,9 +51,11 @@ export async function POST(req: NextRequest) {
 
     // Générer un ID d'extraction unique
     const extractionId = generateExtractionId()
+    console.log(`ID d'extraction généré: ${extractionId}`)
 
     // Si le mode démo est forcé, générer immédiatement des données simulées
     if (requestData.forceDemoMode) {
+      console.log("Mode démo forcé, génération de données simulées")
       // Générer quelques votes simulés immédiatement
       const initialVotes = Array.from({ length: 3 }, (_, i) =>
         createSimulatedVote(i, requestData.commissionId, requestData.startDate, requestData.extractDetails),
@@ -71,14 +67,16 @@ export async function POST(req: NextRequest) {
         message: "Extraction démarrée en mode démo",
         votes: initialVotes,
         demoMode: true,
-        // Ajouter un jeton signé pour l'authentification des requêtes futures
         token: generateToken(extractionId),
       })
     }
 
     // Pour une extraction réelle, essayer d'appeler l'API Render
     const renderApiUrl = process.env.RENDER_API_URL
+    console.log(`URL de l'API Render: ${renderApiUrl || "non définie"}`)
+
     if (!renderApiUrl) {
+      console.log("RENDER_API_URL non définie, fallback en mode démo")
       // Fallback en mode démo si l'API Render n'est pas configurée
       const initialVotes = Array.from({ length: 2 }, (_, i) =>
         createSimulatedVote(i, requestData.commissionId, requestData.startDate, requestData.extractDetails),
@@ -96,13 +94,20 @@ export async function POST(req: NextRequest) {
 
     try {
       // Tester si l'API Render est accessible
+      console.log(`Ping de l'API Render: ${renderApiUrl}/ping`)
       const pingResponse = await fetch(`${renderApiUrl}/ping`, {
         method: "GET",
-        headers: { Accept: "application/json" },
-        signal: AbortSignal.timeout(5000),
+        headers: {
+          Accept: "application/json",
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+        },
+        signal: AbortSignal.timeout(10000), // 10 secondes
       })
 
+      console.log(`Réponse du ping: ${pingResponse.status} ${pingResponse.statusText}`)
+
       if (!pingResponse.ok) {
+        console.log(`L'API Render a répondu avec un statut ${pingResponse.status}, fallback en mode démo`)
         // Fallback en mode démo si l'API Render n'est pas accessible
         const initialVotes = Array.from({ length: 2 }, (_, i) =>
           createSimulatedVote(i, requestData.commissionId, requestData.startDate, requestData.extractDetails),
@@ -119,20 +124,67 @@ export async function POST(req: NextRequest) {
       }
 
       // Appeler l'API Render pour démarrer l'extraction
-      // Pour l'instant, retourner des données simulées
-      const initialVotes = Array.from({ length: 2 }, (_, i) =>
-        createSimulatedVote(i, requestData.commissionId, requestData.startDate, requestData.extractDetails),
-      )
+      console.log(`Appel de l'API Render pour l'extraction: ${renderApiUrl}/api/extract-votes`)
 
+      // Préparer les données pour l'API Render
+      const renderRequestData = {
+        ...requestData,
+        extractionId,
+        callbackUrl: process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000",
+      }
+
+      console.log("Données envoyées à l'API Render:", {
+        ...renderRequestData,
+        credentials: "***HIDDEN***",
+      })
+
+      const response = await fetch(`${renderApiUrl}/api/extract-votes`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+        },
+        body: JSON.stringify(renderRequestData),
+        signal: AbortSignal.timeout(30000), // 30 secondes
+      })
+
+      console.log(`Réponse de l'API Render: ${response.status} ${response.statusText}`)
+
+      if (!response.ok) {
+        console.log(`L'API Render a répondu avec une erreur ${response.status}, fallback en mode démo`)
+        // Fallback en mode démo si l'API Render répond avec une erreur
+        const initialVotes = Array.from({ length: 2 }, (_, i) =>
+          createSimulatedVote(i, requestData.commissionId, requestData.startDate, requestData.extractDetails),
+        )
+
+        return NextResponse.json({
+          extractionId,
+          status: "in-progress",
+          message: `Extraction démarrée en mode démo (erreur API Render: ${response.status})`,
+          votes: initialVotes,
+          demoMode: true,
+          token: generateToken(extractionId),
+          renderError: `Statut HTTP: ${response.status}`,
+        })
+      }
+
+      // Lire la réponse de l'API Render
+      const data = await response.json()
+      console.log("Données reçues de l'API Render:", data)
+
+      // Retourner les données initiales de l'API Render
       return NextResponse.json({
         extractionId,
         status: "in-progress",
-        message: "Extraction démarrée",
-        votes: initialVotes,
+        message: "Extraction démarrée via l'API Render",
+        votes: data.votes || [],
         demoMode: false,
         token: generateToken(extractionId),
+        renderResponse: data,
       })
     } catch (error: any) {
+      console.error("Erreur lors de l'appel à l'API Render:", error)
+
       // En cas d'erreur, passer en mode démo
       const initialVotes = Array.from({ length: 2 }, (_, i) =>
         createSimulatedVote(i, requestData.commissionId, requestData.startDate, requestData.extractDetails),
@@ -149,154 +201,8 @@ export async function POST(req: NextRequest) {
       })
     }
   } catch (error: any) {
+    console.error("Erreur générale:", error)
     return NextResponse.json({ error: `Erreur lors du démarrage de l'extraction: ${error.message}` }, { status: 500 })
-  }
-}
-
-// Ajouter cette fonction pour générer un jeton simple
-function generateToken(extractionId: string): string {
-  // Dans une implémentation réelle, vous utiliseriez une bibliothèque comme jsonwebtoken
-  // Pour l'instant, utilisons une méthode simple
-  return Buffer.from(`${extractionId}:${Date.now()}:secret-key`).toString("base64")
-}
-
-// Fonction pour démarrer l'extraction en arrière-plan
-async function startExtraction(extractionId: string, requestData: any) {
-  const extraction = extractionsMap.get(extractionId)
-  if (!extraction) return
-
-  try {
-    // Mettre à jour le statut
-    extraction.status = "in-progress"
-    extractionsMap.set(extractionId, extraction)
-
-    // Vérifier si le mode démo est forcé
-    if (requestData.forceDemoMode) {
-      // Simuler une extraction progressive en mode démo
-      await simulateProgressiveExtraction(extractionId, requestData)
-      return
-    }
-
-    // Essayer d'appeler l'API Render pour une extraction réelle
-    const renderApiUrl = process.env.RENDER_API_URL
-    if (!renderApiUrl) {
-      throw new Error("RENDER_API_URL non définie")
-    }
-
-    try {
-      // Tester si l'API Render est accessible
-      const pingResponse = await fetch(`${renderApiUrl}/ping`, {
-        method: "GET",
-        headers: { Accept: "application/json" },
-        signal: AbortSignal.timeout(5000),
-      })
-
-      if (!pingResponse.ok) {
-        throw new Error(`L'API Render a répondu avec un statut ${pingResponse.status}`)
-      }
-
-      // Appeler l'API Render pour démarrer l'extraction
-      const response = await fetch(`${renderApiUrl}/api/extract-votes-stream`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...requestData,
-          extractionId,
-        }),
-        signal: AbortSignal.timeout(30000),
-      })
-
-      if (!response.ok) {
-        throw new Error(`Erreur de l'API Render: ${response.status}`)
-      }
-
-      // Lire la réponse
-      const data = await response.json()
-
-      // Si l'API Render a déjà des résultats, les ajouter
-      if (data.votes && Array.isArray(data.votes)) {
-        const extraction = extractionsMap.get(extractionId)
-        if (extraction) {
-          extraction.votes = data.votes
-          extraction.status = data.status || "in-progress"
-          extraction.message = data.message
-          extractionsMap.set(extractionId, extraction)
-        }
-      }
-    } catch (error: any) {
-      console.error("Erreur lors de l'appel à l'API Render:", error)
-
-      // En cas d'erreur, passer en mode démo
-      const extraction = extractionsMap.get(extractionId)
-      if (extraction) {
-        extraction.demoMode = true
-        extractionsMap.set(extractionId, extraction)
-      }
-
-      // Simuler une extraction progressive en mode démo
-      await simulateProgressiveExtraction(extractionId, requestData)
-    }
-  } catch (error: any) {
-    // En cas d'erreur, marquer l'extraction comme échouée
-    const extraction = extractionsMap.get(extractionId)
-    if (extraction) {
-      extraction.status = "failed"
-      extraction.message = error.message
-      extraction.endTime = Date.now()
-      extractionsMap.set(extractionId, extraction)
-    }
-  }
-}
-
-// Fonction pour simuler une extraction progressive en mode démo
-async function simulateProgressiveExtraction(extractionId: string, requestData: any) {
-  const extraction = extractionsMap.get(extractionId)
-  if (!extraction) return
-
-  try {
-    // Déchiffrer les identifiants simulés
-    const username = simulateDecryption(requestData.credentials.encryptedUsername)
-    const password = simulateDecryption(requestData.credentials.encryptedPassword)
-
-    // Générer des votes simulés
-    const totalVotes = Math.floor(Math.random() * 10) + 5 // Entre 5 et 15 votes
-
-    // Ajouter les votes progressivement
-    for (let i = 0; i < totalVotes; i++) {
-      // Vérifier si l'extraction existe toujours
-      const currentExtraction = extractionsMap.get(extractionId)
-      if (!currentExtraction || currentExtraction.status === "failed") {
-        break
-      }
-
-      // Créer un vote simulé
-      const vote = createSimulatedVote(i, requestData.commissionId, requestData.startDate, requestData.extractDetails)
-
-      // Ajouter le vote à l'extraction
-      currentExtraction.votes.push(vote)
-      extractionsMap.set(extractionId, currentExtraction)
-
-      // Attendre un peu pour simuler le temps d'extraction
-      await new Promise((resolve) => setTimeout(resolve, 500 + Math.random() * 1000))
-    }
-
-    // Marquer l'extraction comme terminée
-    const finalExtraction = extractionsMap.get(extractionId)
-    if (finalExtraction) {
-      finalExtraction.status = "completed"
-      finalExtraction.endTime = Date.now()
-      finalExtraction.message = "Extraction terminée avec succès (mode démo)"
-      extractionsMap.set(extractionId, finalExtraction)
-    }
-  } catch (error: any) {
-    // En cas d'erreur, marquer l'extraction comme échouée
-    const extraction = extractionsMap.get(extractionId)
-    if (extraction) {
-      extraction.status = "failed"
-      extraction.message = error.message
-      extraction.endTime = Date.now()
-      extractionsMap.set(extractionId, extraction)
-    }
   }
 }
 
