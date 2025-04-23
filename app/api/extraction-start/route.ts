@@ -55,8 +55,8 @@ export async function POST(req: NextRequest) {
 
     try {
       // Tester si l'API Render est accessible
-      console.log(`Ping de l'API Render: ${renderApiUrl}/ping`)
-      const pingResponse = await fetch(`${renderApiUrl}/ping`, {
+      console.log(`Ping de l'API Render: ${renderApiUrl}/api/ping`)
+      const pingResponse = await fetch(`${renderApiUrl}/api/ping`, {
         method: "GET",
         headers: {
           Accept: "application/json",
@@ -80,7 +80,7 @@ export async function POST(req: NextRequest) {
       }
 
       // Appeler l'API Render pour démarrer l'extraction
-      console.log(`Appel de l'API Render pour l'extraction: ${renderApiUrl}/api/extract-votes`)
+      console.log(`Appel de l'API Render pour l'extraction: ${renderApiUrl}/extract-votes`)
 
       // Préparer les données pour l'API Render
       const renderRequestData = {
@@ -94,7 +94,7 @@ export async function POST(req: NextRequest) {
         credentials: "***HIDDEN***",
       })
 
-      const response = await fetch(`${renderApiUrl}/api/extract-votes`, {
+      const response = await fetch(`${renderApiUrl}/extract-votes`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
