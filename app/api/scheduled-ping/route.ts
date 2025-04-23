@@ -1,68 +1,71 @@
 import { NextResponse } from "next/server"
 
-// Cette route est conçue pour être appelée par un cron job Vercel
-// afin de maintenir l'API Render active
-export const runtime = "edge"
+export const runtime = "nodejs"
 export const maxDuration = 10
 
-export async function GET() {
-  const startTime = Date.now()
-  const logs: string[] = []
-
+export async function GET(request: Request) {
   try {
-    logs.push(`Ping programmé démarré à ${new Date().toISOString()}`)
-    // Ajouter plus de logs pour faciliter le débogage
-    const baseUrl = process.env.RENDER_SERVICE_URL || process.env.VERCEL_URL || "http://localhost:3000"
-    logs.push(`Utilisation de l'URL de base: ${baseUrl}`)
+    // Récupérer l'URL de l'API Render depuis les variables d'environnement
+    const renderApiUrl = process.env.RENDER_API_URL
 
-    // Ajouter un try/catch plus détaillé autour du fetch
+    if (!renderApiUrl) {
+      return NextResponse.json({
+        success: false,
+        message: "L'URL de l'API Render n'est pas configurée (RENDER_API_URL manquante)",
+      })
+    }
+
+    // Ajouter un paramètre de cache-buster pour éviter les réponses en cache
+    const timestamp = new Date().getTime()
+    const pingUrl = `${renderApiUrl}/ping?cache=${timestamp}`
+
+    console.log(`Ping programmé de l'API Render: ${pingUrl}`)
+
+    // Définir un timeout pour la requête
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 5000) // 5 secondes
+
     try {
-      logs.push(`Tentative d'appel à ${new URL("/api/ping-render", baseUrl).toString()}`)
-      const response = await fetch(new URL("/api/ping-render", baseUrl), {
+      const response = await fetch(pingUrl, {
         method: "GET",
         headers: {
           "Cache-Control": "no-cache, no-store, must-revalidate",
+          Pragma: "no-cache",
+          Expires: "0",
         },
+        signal: controller.signal,
       })
 
-      const data = await response.json()
-      const duration = Date.now() - startTime
+      // Nettoyer le timeout
+      clearTimeout(timeoutId)
 
-      logs.push(`Ping terminé en ${duration}ms avec statut: ${response.status}`)
+      // Lire le corps de la réponse
+      const responseText = await response.text()
 
       return NextResponse.json({
-        success: response.ok,
+        success: true,
+        status: response.status,
+        statusText: response.statusText,
+        responseText: responseText.substring(0, 200),
         timestamp: new Date().toISOString(),
-        duration: `${duration}ms`,
-        pingResult: data,
-        logs,
       })
     } catch (error) {
-      const duration = Date.now() - startTime
-      logs.push(`Erreur lors de l'appel fetch: ${error instanceof Error ? error.message : String(error)}`)
+      // Nettoyer le timeout en cas d'erreur
+      clearTimeout(timeoutId)
 
-      return NextResponse.json(
-        {
-          success: false,
-          timestamp: new Date().toISOString(),
-          duration: `${duration}ms`,
-          error: error instanceof Error ? error.message : String(error),
-          logs,
-        },
-        { status: 500 },
-      )
+      return NextResponse.json({
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+        timestamp: new Date().toISOString(),
+      })
     }
   } catch (error) {
-    const duration = Date.now() - startTime
-    logs.push(`Erreur lors du ping programmé: ${error instanceof Error ? error.message : String(error)}`)
-
+    console.error("Erreur lors du ping programmé de l'API Render:", error)
     return NextResponse.json(
       {
         success: false,
-        timestamp: new Date().toISOString(),
-        duration: `${duration}ms`,
         error: error instanceof Error ? error.message : String(error),
-        logs,
+        timestamp: new Date().toISOString(),
       },
       { status: 500 },
     )
