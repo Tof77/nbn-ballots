@@ -111,12 +111,12 @@ export async function GET(request: Request) {
           statusCode: response.status,
         })
       }
-    } catch (error) {
+    } catch (error: unknown) {
       // Nettoyer le timeout en cas d'erreur
       clearTimeout(timeoutId)
 
       // Vérifier si c'est une erreur d'abandon (timeout)
-      if (error.name === "AbortError") {
+      if (error instanceof Error && error.name === "AbortError") {
         return NextResponse.json({
           success: false,
           status: "timeout",
@@ -129,10 +129,10 @@ export async function GET(request: Request) {
         success: false,
         status: "error",
         statusMessage: "error",
-        message: `Erreur lors de la connexion à l'API Render: ${error.message}`,
+        message: `Erreur lors de la connexion à l'API Render: ${error instanceof Error ? error.message : String(error)}`,
       })
     }
-  } catch (error) {
+  } catch (error: unknown) {
     console.error("Erreur lors du réchauffement de l'API Render:", error)
     return NextResponse.json(
       {
