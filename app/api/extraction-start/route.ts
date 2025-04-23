@@ -34,6 +34,13 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // Ajouter plus de logs pour le débogage des identifiants
+
+    // Après avoir reçu les identifiants chiffrés du client, ajouter:
+    console.log("Identifiants reçus du client:")
+    console.log(`Username chiffré length: ${requestData.credentials.encryptedUsername.length}`)
+    console.log(`Password chiffré length: ${requestData.credentials.encryptedPassword.length}`)
+
     // Générer un ID d'extraction unique
     const extractionId = generateExtractionId()
     console.log(`ID d'extraction généré: ${extractionId}`)
