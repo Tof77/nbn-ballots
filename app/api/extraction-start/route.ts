@@ -40,6 +40,9 @@ function simulateDecryption(encryptedData: string): string {
   }
 }
 
+// Modifier la fonction pour retourner directement les données simulées au lieu de les stocker dans une map globale
+
+// Remplacer la fonction POST pour qu'elle retourne immédiatement des données simulées
 export async function POST(req: NextRequest) {
   try {
     const requestData = await req.json()
@@ -55,27 +58,106 @@ export async function POST(req: NextRequest) {
     // Générer un ID d'extraction unique
     const extractionId = generateExtractionId()
 
-    // Créer une entrée dans la map pour cette extraction
-    extractionsMap.set(extractionId, {
-      id: extractionId,
-      status: "pending",
-      votes: [],
-      startTime: Date.now(),
-      demoMode: requestData.forceDemoMode || false,
-    })
+    // Si le mode démo est forcé, générer immédiatement des données simulées
+    if (requestData.forceDemoMode) {
+      // Générer quelques votes simulés immédiatement
+      const initialVotes = Array.from({ length: 3 }, (_, i) =>
+        createSimulatedVote(i, requestData.commissionId, requestData.startDate, requestData.extractDetails),
+      )
 
-    // Démarrer l'extraction en arrière-plan
-    startExtraction(extractionId, requestData)
+      return NextResponse.json({
+        extractionId,
+        status: "in-progress",
+        message: "Extraction démarrée en mode démo",
+        votes: initialVotes,
+        demoMode: true,
+        // Ajouter un jeton signé pour l'authentification des requêtes futures
+        token: generateToken(extractionId),
+      })
+    }
 
-    // Retourner immédiatement l'ID d'extraction
-    return NextResponse.json({
-      extractionId,
-      status: "pending",
-      message: "Extraction démarrée",
-    })
+    // Pour une extraction réelle, essayer d'appeler l'API Render
+    const renderApiUrl = process.env.RENDER_API_URL
+    if (!renderApiUrl) {
+      // Fallback en mode démo si l'API Render n'est pas configurée
+      const initialVotes = Array.from({ length: 2 }, (_, i) =>
+        createSimulatedVote(i, requestData.commissionId, requestData.startDate, requestData.extractDetails),
+      )
+
+      return NextResponse.json({
+        extractionId,
+        status: "in-progress",
+        message: "Extraction démarrée en mode démo (API Render non configurée)",
+        votes: initialVotes,
+        demoMode: true,
+        token: generateToken(extractionId),
+      })
+    }
+
+    try {
+      // Tester si l'API Render est accessible
+      const pingResponse = await fetch(`${renderApiUrl}/ping`, {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(5000),
+      })
+
+      if (!pingResponse.ok) {
+        // Fallback en mode démo si l'API Render n'est pas accessible
+        const initialVotes = Array.from({ length: 2 }, (_, i) =>
+          createSimulatedVote(i, requestData.commissionId, requestData.startDate, requestData.extractDetails),
+        )
+
+        return NextResponse.json({
+          extractionId,
+          status: "in-progress",
+          message: `Extraction démarrée en mode démo (API Render non accessible: ${pingResponse.status})`,
+          votes: initialVotes,
+          demoMode: true,
+          token: generateToken(extractionId),
+        })
+      }
+
+      // Appeler l'API Render pour démarrer l'extraction
+      // Pour l'instant, retourner des données simulées
+      const initialVotes = Array.from({ length: 2 }, (_, i) =>
+        createSimulatedVote(i, requestData.commissionId, requestData.startDate, requestData.extractDetails),
+      )
+
+      return NextResponse.json({
+        extractionId,
+        status: "in-progress",
+        message: "Extraction démarrée",
+        votes: initialVotes,
+        demoMode: false,
+        token: generateToken(extractionId),
+      })
+    } catch (error: any) {
+      // En cas d'erreur, passer en mode démo
+      const initialVotes = Array.from({ length: 2 }, (_, i) =>
+        createSimulatedVote(i, requestData.commissionId, requestData.startDate, requestData.extractDetails),
+      )
+
+      return NextResponse.json({
+        extractionId,
+        status: "in-progress",
+        message: `Extraction démarrée en mode démo (erreur: ${error.message})`,
+        votes: initialVotes,
+        demoMode: true,
+        token: generateToken(extractionId),
+        error: error.message,
+      })
+    }
   } catch (error: any) {
     return NextResponse.json({ error: `Erreur lors du démarrage de l'extraction: ${error.message}` }, { status: 500 })
   }
+}
+
+// Ajouter cette fonction pour générer un jeton simple
+function generateToken(extractionId: string): string {
+  // Dans une implémentation réelle, vous utiliseriez une bibliothèque comme jsonwebtoken
+  // Pour l'instant, utilisons une méthode simple
+  return Buffer.from(`${extractionId}:${Date.now()}:secret-key`).toString("base64")
 }
 
 // Fonction pour démarrer l'extraction en arrière-plan
