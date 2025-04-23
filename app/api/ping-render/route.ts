@@ -6,20 +6,26 @@ export const runtime = "edge"
 export const maxDuration = 30
 
 export async function GET() {
+  console.log("Démarrage de l'API ping-render à", new Date().toISOString())
   const diagnostics: string[] = []
   const startTime = Date.now()
 
   try {
+    // Appel à l'API Render
     const renderApiUrl = process.env.RENDER_API_URL
-
     if (!renderApiUrl) {
-      return NextResponse.json({
-        success: false,
-        message: "RENDER_API_URL non définie",
-        diagnostics,
-        timestamp: new Date().toISOString(),
-      })
+      console.log("RENDER_API_URL n'est pas défini")
+      return NextResponse.json(
+        {
+          success: false,
+          message: "RENDER_API_URL n'est pas défini",
+          timestamp: new Date().toISOString(),
+        },
+        { status: 500 },
+      )
     }
+
+    console.log("Tentative d'appel à", renderApiUrl)
 
     diagnostics.push(`Envoi d'un ping à l'API Render: ${renderApiUrl}`)
     console.log("Envoi d'un ping à l'API Render:", renderApiUrl)
@@ -78,17 +84,21 @@ export async function GET() {
       })
     }
   } catch (error) {
+    console.error("Erreur lors du ping Render:", error)
     const totalDuration = Date.now() - startTime
     diagnostics.push(`Durée totale jusqu'à l'erreur: ${totalDuration}ms`)
     diagnostics.push(`Erreur lors du ping: ${error instanceof Error ? error.message : String(error)}`)
 
-    return NextResponse.json({
-      success: false,
-      status: "error",
-      message: error instanceof Error ? error.message : String(error),
-      totalTime: `${totalDuration}ms`,
-      diagnostics,
-      timestamp: new Date().toISOString(),
-    })
+    return NextResponse.json(
+      {
+        success: false,
+        status: "error",
+        message: error instanceof Error ? error.message : String(error),
+        totalTime: `${totalDuration}ms`,
+        diagnostics,
+        timestamp: new Date().toISOString(),
+      },
+      { status: 500 },
+    )
   }
 }
