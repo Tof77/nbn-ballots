@@ -26,6 +26,7 @@ import {
 } from "lucide-react"
 import { encryptCredentials } from "@/utils/encryption"
 import { useRouter } from "next/navigation"
+import { JSEncrypt } from "jsencrypt"
 
 // Interface pour la réponse de l'API
 interface ApiResponse {
@@ -201,11 +202,11 @@ interface VoteExtractionFormProps {
 }
 
 export default function VoteExtractionForm({ onResultsReceived }: VoteExtractionFormProps) {
+  const [username, setUsername] = useState("")
+  const [password, setPassword] = useState("")
   const [commissionId, setCommissionId] = useState("")
   const [startDate, setStartDate] = useState("")
   const [extractDetails, setExtractDetails] = useState(true)
-  const [username, setUsername] = useState("")
-  const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [publicKeyLoaded, setPublicKeyLoaded] = useState(false)
@@ -233,6 +234,7 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
   const [pollingInterval, setPollingInterval] = useState<number | null>(null)
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const router = useRouter()
+  const [publicKey, setPublicKey] = useState<string | null>(null)
 
   // Vérifier que la clé publique est disponible au chargement du composant
   useEffect(() => {
@@ -240,7 +242,13 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
       try {
         const response = await fetch("/api/public-key")
         if (response.ok) {
-          setPublicKeyLoaded(true)
+          const data = await response.json()
+          if (data.publicKey) {
+            setPublicKey(data.publicKey)
+            setPublicKeyLoaded(true)
+          } else {
+            setError("Impossible de charger la clé publique pour le chiffrement")
+          }
         } else {
           setError("Impossible de charger la clé publique pour le chiffrement")
         }
@@ -429,6 +437,22 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
     }
 
     try {
+      if (!publicKey) {
+        setError("Clé publique non disponible")
+        setLoading(false)
+        return
+      }
+
+      // Chiffrer les identifiants
+      const encrypt = new JSEncrypt()
+      encrypt.setPublicKey(publicKey)
+      const encryptedUsername = encrypt.encrypt(username)
+      const encryptedPassword = encrypt.encrypt(password)
+
+      if (!encryptedUsername || !encryptedPassword) {
+        throw new Error("Échec du chiffrement des identifiants")
+      }
+
       // Réchauffer l'API Render avant de l'utiliser
       setDebugInfo("Réchauffement de l'API Render...")
       const warmupResult = await warmupRenderApi()
@@ -471,7 +495,10 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
       }
 
       // Chiffrer les identifiants avant de les envoyer
-      const { encryptedUsername, encryptedPassword } = await encryptCredentials(username, password)
+      const { encryptedUsername: encryptedUsername2, encryptedPassword: encryptedPassword2 } = await encryptCredentials(
+        username,
+        password,
+      )
 
       // Préparer les données à envoyer
       const requestData = {
@@ -486,8 +513,8 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
 
       // Ajouter les identifiants déchiffrés pour le débogage
       try {
-        const decryptedUsername = simulateDecryption(encryptedUsername)
-        const decryptedPassword = simulateDecryption(encryptedPassword)
+        const decryptedUsername = simulateDecryption(encryptedUsername2)
+        const decryptedPassword = simulateDecryption(encryptedPassword2)
 
         // Ajouter les identifiants déchiffrés à la requête
         requestData.credentials.username = decryptedUsername
