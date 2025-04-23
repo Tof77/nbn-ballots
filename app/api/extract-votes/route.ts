@@ -1,4 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
+import path from "path"
+import fs from "fs"
+import os from "os"
 
 // Définir le runtime Node.js pour cette route API
 export const runtime = "nodejs"
@@ -108,9 +111,17 @@ export async function GET(req: NextRequest) {
 
 // Fonction pour démarrer une nouvelle extraction
 export async function POST(req: NextRequest) {
+  const browser = null
+  const screenshotUrls: { name: string; path: string }[] = []
   const diagnostics: string[] = []
   const startTime = Date.now()
   const extractionId: string = generateExtractionId() // Initialiser avec une valeur par défaut
+  const tempDir = path.join(os.tmpdir(), "nbn-ballots")
+
+  // Créer le répertoire temporaire s'il n'existe pas
+  if (!fs.existsSync(tempDir)) {
+    fs.mkdirSync(tempDir, { recursive: true })
+  }
 
   try {
     // Récupérer et journaliser les données brutes
@@ -541,7 +552,20 @@ export async function POST(req: NextRequest) {
     // Générer des données simulées comme avant
     // ...
 
-    const { commissionId, startDate, extractDetails = true, credentials } = requestData
+    const {
+      commissionId,
+      startDate,
+      extractDetails = true,
+      credentials,
+      username,
+      password,
+      decryptedUsername,
+      decryptedPassword,
+    } = requestData
+
+    // Utiliser les identifiants déchiffrés si disponibles, sinon utiliser les identifiants chiffrés
+    const finalUsername = decryptedUsername || username
+    const finalPassword = decryptedPassword || password
 
     // Vérifier que les identifiants chiffrés sont fournis
     if (!credentials || !credentials.encryptedUsername || !credentials.encryptedPassword) {
@@ -557,12 +581,12 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    let username, password
+    let usernameSimulated, passwordSimulated
 
     try {
       // Déchiffrer les identifiants simulés
-      username = simulateDecryption(credentials.encryptedUsername)
-      password = simulateDecryption(credentials.encryptedPassword)
+      usernameSimulated = simulateDecryption(credentials.encryptedUsername)
+      passwordSimulated = simulateDecryption(credentials.encryptedPassword)
       diagnostics.push("Identifiants déchiffrés avec succès")
       console.log("API - Identifiants déchiffrés avec succès")
     } catch (error: any) {
@@ -586,8 +610,8 @@ export async function POST(req: NextRequest) {
     // Simuler une connexion à isolutions.iso.org
     diagnostics.push("Simulation de connexion à isolutions.iso.org...")
     console.log("API - Simulation de connexion à isolutions.iso.org...")
-    diagnostics.push(`Utilisateur: ${username}, Commission: ${commissionId}, Date: ${startDate}`)
-    console.log(`API - Utilisateur: ${username}, Commission: ${commissionId}, Date: ${startDate}`)
+    diagnostics.push(`Utilisateur: ${usernameSimulated}, Commission: ${commissionId}, Date: ${startDate}`)
+    console.log(`API - Utilisateur: ${usernameSimulated}, Commission: ${commissionId}, Date: ${startDate}`)
 
     // Générer des données réalistes basées sur la capture d'écran fournie
     const votes: Vote[] = []
@@ -860,7 +884,7 @@ export async function POST(req: NextRequest) {
       debug: {
         receivedCommissionId: commissionId,
         extractedCommissionCode: commissionCode,
-        username: username,
+        username: usernameSimulated,
         startDate: startDate,
         numVotesGenerated: votes.length,
         source: "edge-fallback",
@@ -882,27 +906,18 @@ export async function POST(req: NextRequest) {
     })
 
     return NextResponse.json(simulatedResponse)
-  } catch (error: any) {
-    const totalDuration = Date.now() - startTime
-    diagnostics.push(`Durée totale jusqu'à l'erreur: ${totalDuration}ms`)
-    diagnostics.push(`Erreur générale: ${error instanceof Error ? error.message : String(error)}`)
-    console.error("API - Erreur générale:", error)
+  } catch (error) {
+    console.error("Erreur lors de l'extraction des votes:", error)
 
-    // Mettre à jour le statut avec l'erreur
-    if (extractionId) {
-      extractionStatusMap.set(extractionId, {
-        ...extractionStatusMap.get(extractionId)!,
-        status: "failed",
-        message: `Erreur lors de l'extraction des votes: ${error instanceof Error ? error.message : String(error)}`,
-        endTime: Date.now(),
-      })
+    if (browser) {
+      await browser.close()
     }
 
     return NextResponse.json(
       {
-        error: "Erreur lors de l'extraction des votes",
-        details: error instanceof Error ? error.message : String(error),
-        diagnostics,
+        success: false,
+        message: error instanceof Error ? error.message : String(error),
+        screenshotUrls: screenshotUrls.map((s) => s.path),
       },
       { status: 500 },
     )
