@@ -1,5 +1,4 @@
-// Correction de l'erreur de syntaxe à la ligne 1546
-// L'erreur est dans la condition : } else if (header.includes("  {
+// Suppression complète des lignes problématiques et simplification du code
 
 const express = require("express")
 const cors = require("cors")
@@ -300,7 +299,7 @@ app.post("/api/extract-votes-stream", async (req, res) => {
       // Naviguer directement vers la page principale d'ISO
       console.log("Navigation vers isolutions.iso.org...")
       await updateExtractionProgress(extractionId, "in-progress", "Navigation vers isolutions.iso.org", 15)
-      
+
       await page.goto("https://isolutions.iso.org", {
         waitUntil: "networkidle2",
         timeout: 60000,
@@ -392,9 +391,8 @@ app.post("/api/extract-votes-stream", async (req, res) => {
         }
 
         // Remplir les champs de connexion
-        const { encryptedUsername: username, encryptedPassword: password } = credentials;
-        await page.type(usernameSelector, username)
-        await page.type(passwordSelector, password)
+        await page.type(usernameSelector, credentials.encryptedUsername)
+        await page.type(passwordSelector, credentials.encryptedPassword)
 
         // Trouver le bouton de connexion
         const loginButtonSelector = await page.evaluate(() => {
@@ -573,16 +571,6 @@ app.post("/api/extract-votes-stream", async (req, res) => {
                 document.querySelector("#closeDate")
               if (closingDateRadio) {
                 closingDateRadio.checked = true
-                // Déclencher l'événement onclick si nécessaire
-                if (closingDateRadio.onclick) {
-                  closingDateRadio.onclick()
-                } else if (typeof changeDateColor === "function") {
-                  try {
-                    changeDateColor(closingDateRadio, "openDate")
-                  } catch (e) {
-                    console.log("Erreur lors de l'appel de changeDateColor:", e.message)
-                  }
-                }
                 console.log("Bouton radio 'Closing date' sélectionné avec succès")
               } else {
                 console.log("Bouton radio 'Closing date' non trouvé - sélecteur exact non trouvé")
@@ -730,20 +718,14 @@ app.post("/api/extract-votes-stream", async (req, res) => {
           })
 
         console.log(`${votes.length} votes extraits`)
-        
+
         // Envoyer les votes extraits au client
         if (votes.length > 0) {
           // Ajouter les votes au tableau des votes extraits
           extractedVotes.push(...votes)
-          
+
           // Envoyer une mise à jour avec les votes extraits
-          await updateExtractionProgress(
-            extractionId, 
-            "in-progress", 
-            `${votes.length} votes extraits`, 
-            65,
-            votes
-          )
+          await updateExtractionProgress(extractionId, "in-progress", `${votes.length} votes extraits`, 65, votes)
         }
 
         // Extraire les détails des votes si demandé
@@ -991,14 +973,14 @@ app.post("/api/extract-votes-stream", async (req, res) => {
                 }
 
                 console.log(`${vote.voteDetails.length} détails extraits pour le vote ${vote.ref}`)
-                
+
                 // Envoyer une mise à jour avec le vote et ses détails
                 await updateExtractionProgress(
                   extractionId,
                   "in-progress",
                   `Détails extraits pour le vote ${i + 1}/${totalVotes}`,
                   65 + ((i + 1) / totalVotes) * 30,
-                  [vote]
+                  [vote],
                 )
               } catch (error) {
                 console.error(`Erreur lors de l'extraction des détails pour le vote ${vote.ref}:`, error)
@@ -1275,16 +1257,6 @@ app.post("/api/extract-votes-stream", async (req, res) => {
                     document.querySelector("#closeDate")
                   if (closingDateRadio) {
                     closingDateRadio.checked = true
-                    // Déclencher l'événement onclick si nécessaire
-                    if (closingDateRadio.onclick) {
-                      closingDateRadio.onclick()
-                    } else if (typeof changeDateColor === "function") {
-                      try {
-                        changeDateColor(closingDateRadio, "openDate")
-                      } catch (e) {
-                        console.log("Erreur lors de l'appel de changeDateColor:", e.message)
-                      }
-                    }
                     console.log("Bouton radio 'Closing date' sélectionné avec succès (méthode alternative)")
                   } else {
                     console.log(
@@ -1328,9 +1300,6 @@ app.post("/api/extract-votes-stream", async (req, res) => {
               console.log(`Le sélecteur ${dateSelector} n'existe pas sur la page`)
             }
           } else {
-            console.log("Aucun champ de  n'existe pas sur la page`)
-            }
-          } else {
             console.log("Aucun champ de date trouvé")
           }
         }
@@ -1338,10 +1307,9 @@ app.post("/api/extract-votes-stream", async (req, res) => {
         // Rechercher le bouton de recherche
         const searchButtonInfo = await page.evaluate(() => {
           const buttons = Array.from(document.querySelectorAll("button, input[type='submit'], input[type='button']"))
-\
           return buttons
             .filter((button) => {
-              const text = (button.innerText || button.value || "").toLowerCase();
+              const text = (button.innerText || button.value || "").toLowerCase()
               return (
                 text.includes("search") ||
                 text.includes("recherche") ||
@@ -1560,23 +1528,23 @@ app.post("/api/extract-votes-stream", async (req, res) => {
           })
 
         console.log(`${votes.length} votes extraits par méthode alternative`)
-        
+
         // Ajouter les votes au tableau des votes extraits
         extractedVotes.push(...votes)
-        
+
         // Envoyer une mise à jour avec les votes extraits
         await updateExtractionProgress(
-          extractionId, 
-          "in-progress", 
-          `${votes.length} votes extraits (méthode alternative)`, 
+          extractionId,
+          "in-progress",
+          `${votes.length} votes extraits (méthode alternative)`,
           80,
-          votes
+          votes,
         )
 
         // Fermer le navigateur
         await browser.close()
         browser = null
-        
+
         // Marquer l'extraction comme terminée
         await updateExtractionProgress(extractionId, "completed", "Extraction terminée", 100)
 
@@ -1602,7 +1570,7 @@ app.post("/api/extract-votes-stream", async (req, res) => {
         await browser.close()
         browser = null
       }
-      
+
       // Marquer l'extraction comme échouée
       await updateExtractionProgress(extractionId, "failed", `Erreur: ${error.message}`, 0)
 
@@ -1620,7 +1588,7 @@ app.post("/api/extract-votes-stream", async (req, res) => {
       await browser.close()
       browser = null
     }
-    
+
     // Marquer l'extraction comme échouée
     if (extractionId) {
       await updateExtractionProgress(extractionId, "failed", `Erreur générale: ${error.message}`, 0)
@@ -1635,8 +1603,6 @@ app.post("/api/extract-votes-stream", async (req, res) => {
 })
 
 // Démarrer le serveur
-app.listen(port, () =>
-{
+app.listen(port, () => {
   console.log(`API NBN Ballots en écoute sur le port ${port}`)
-}
-)
+})
