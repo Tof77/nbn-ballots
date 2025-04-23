@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
-import puppeteer from "puppeteer"
+import puppeteer from "puppeteer-core"
+import chromium from "@sparticuz/chromium"
 
 export async function POST(req: NextRequest) {
   let browser = null
@@ -12,10 +13,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Les identifiants sont requis" }, { status: 400 })
     }
 
+    // Configurer Puppeteer avec Chromium
+    const executablePath = await chromium.executablePath()
+
     // Lancer Puppeteer
     browser = await puppeteer.launch({
+      args: [...chromium.args, "--hide-scrollbars", "--disable-web-security"],
+      defaultViewport: chromium.defaultViewport,
+      executablePath,
       headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+      ignoreHTTPSErrors: true,
     })
 
     const page = await browser.newPage()
@@ -31,9 +38,6 @@ export async function POST(req: NextRequest) {
 
     // Attendre que la page soit chargée
     await new Promise((resolve) => setTimeout(resolve, 5000))
-
-    // Prendre une capture d'écran
-    await page.screenshot({ path: "/tmp/initial-page.png" })
 
     // Vérifier si nous sommes sur la page de connexion
     const currentUrl = page.url()
@@ -88,9 +92,6 @@ export async function POST(req: NextRequest) {
 
       // Attendre un peu
       await new Promise((resolve) => setTimeout(resolve, 10000))
-
-      // Prendre une capture d'écran après la connexion
-      await page.screenshot({ path: "/tmp/after-login.png" })
 
       // Vérifier si nous sommes toujours sur la page de connexion
       const afterLoginUrl = page.url()
