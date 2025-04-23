@@ -392,6 +392,10 @@ app.post("/api/extract-votes-stream", async (req, res) => {
           throw new Error("Impossible de trouver les champs de connexion sur la page")
         }
 
+        // Déchiffrer les identifiants
+        // Note: Les identifiants sont déjà déchiffrés côté client, donc nous utilisons directement les valeurs
+        console.log("Remplissage des champs de connexion...")
+
         // Remplir les champs de connexion
         await page.type(usernameSelector, credentials.encryptedUsername)
         await page.type(passwordSelector, credentials.encryptedPassword)
@@ -431,10 +435,58 @@ app.post("/api/extract-votes-stream", async (req, res) => {
         screenshotUrls.push({ name: "Avant clic sur connexion", url: beforeLoginClickUrl })
 
         // Cliquer sur le bouton de connexion et attendre la navigation
-        await Promise.all([page.click(loginButtonSelector), waitForNavigationSafely(page, { timeout: 60000 })])
+        console.log("Clic sur le bouton de connexion...")
+        await Promise.all([
+          page.click(loginButtonSelector),
+          page.waitForNavigation({ waitUntil: "networkidle2", timeout: 60000 }).catch((e) => {
+            console.log(`Erreur lors de l'attente de navigation après connexion: ${e.message}`)
+          }),
+        ])
 
-        // Attendre un peu pour s'assurer que la page est chargée
-        await delay(5000) // Augmenter le délai à 10 secondes
+        // Attendre un peu plus longtemps pour s'assurer que la redirection est complète
+        console.log("Attente après connexion...")
+        await delay(10000) // Augmenter le délai à 10 secondes
+
+        // Prendre une capture d'écran après la connexion
+        const afterLoginPath = path.join(screenshotsDir, `${sessionId}-after-login.png`)
+        await page.screenshot({ path: afterLoginPath, fullPage: true })
+        const afterLoginUrl = `${baseUrl}/public/screenshots/${path.basename(afterLoginPath)}`
+        screenshotUrls.push({ name: "Après connexion", url: afterLoginUrl })
+
+        // Capturer l'URL actuelle
+        const afterLoginPageUrl = page.url()
+        console.log(`URL après connexion: ${afterLoginPageUrl}`)
+
+        // Vérifier si nous sommes toujours sur la page de connexion
+        if (afterLoginPageUrl.includes("idp.iso.org")) {
+          // Vérifier s'il y a un message d'erreur
+          const errorMessage = await page.evaluate(() => {
+            const errorElements = Array.from(
+              document.querySelectorAll('.alert-error, .error, .alert-danger, [role="alert"]'),
+            )
+            return errorElements.map((el) => el.textContent.trim()).join(" ")
+          })
+
+          if (errorMessage) {
+            console.error(`Message d'erreur de connexion détecté: ${errorMessage}`)
+            throw new Error(`Échec de la connexion: ${errorMessage}`)
+          } else {
+            console.error("Toujours sur la page de connexion après tentative de connexion")
+            throw new Error("Échec de la connexion. Vérifiez vos identifiants.")
+          }
+        }
+
+        // Vérifier si nous sommes sur la page d'accueil ou une autre page ISO
+        const isOnIsoPage = afterLoginPageUrl.includes("isolutions.iso.org")
+        console.log(`Sur une page ISO: ${isOnIsoPage}`)
+
+        if (!isOnIsoPage) {
+          console.error("La connexion a réussi mais la redirection n'a pas abouti à une page ISO")
+          throw new Error("Redirection après connexion incorrecte. Veuillez réessayer.")
+        }
+
+        console.log("Connexion réussie!")
+        await updateExtractionProgress(extractionId, "in-progress", "Connexion réussie", 30)
       } else {
         console.log("Déjà connecté ou redirection automatique non effectuée")
       }
