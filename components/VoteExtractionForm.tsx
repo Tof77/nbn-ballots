@@ -150,6 +150,14 @@ async function warmupRenderApi(queryParams = ""): Promise<WarmupResult> {
 }
 
 // Ajouter cette fonction après la fonction warmupRenderApi
+
+interface EndpointResult {
+  success: boolean
+  url: string
+  status?: string
+  responseText?: string
+}
+
 async function checkRenderApiEndpoints(): Promise<{
   validEndpoint: string | null
   allResults: any[]
@@ -174,7 +182,7 @@ async function checkRenderApiEndpoints(): Promise<{
 
     // Si un ping a réussi, retourner l'URL correspondante
     if (data.success && data.allResults) {
-      const successfulResult = data.allResults.find((result) => result.success)
+      const successfulResult = data.allResults.find((result: EndpointResult) => result.success)
       if (successfulResult) {
         return {
           validEndpoint: successfulResult.url,
