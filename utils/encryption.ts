@@ -1,4 +1,4 @@
-// Cette fonction sera utilisée pour charger la clé publique depuis le serveur
+// This function will be used to load the public key from the server
 export async function getPublicKey(): Promise<string> {
   try {
     const response = await fetch("/api/public-key")
@@ -10,14 +10,14 @@ export async function getPublicKey(): Promise<string> {
   }
 }
 
-// Cette fonction chiffre les données avec la clé publique RSA
+// This function encrypts the data with the RSA public key
 export async function encryptData(data: string, publicKey: string): Promise<string> {
-  // Nous utilisons la bibliothèque JSEncrypt qui sera chargée dynamiquement
+  // We use the JSEncrypt library which will be loaded dynamically
   const JSEncrypt = (await import("jsencrypt")).default
   const encrypt = new JSEncrypt()
   encrypt.setPublicKey(publicKey)
 
-  // Chiffrer les données
+  // Encrypt the data
   const encrypted = encrypt.encrypt(data)
 
   if (!encrypted) {
@@ -27,28 +27,28 @@ export async function encryptData(data: string, publicKey: string): Promise<stri
   return encrypted
 }
 
-// Cette fonction simule le chiffrement pour le mode de démonstration
+// This function simulates encryption for the demo mode
 export async function simulateEncryption(text: string): Promise<string> {
-  // Simple encodage en base64 pour simuler le chiffrement
+  // Simple base64 encoding to simulate encryption
   return btoa(`demo:${text}`)
 }
 
-// Cette fonction déchiffre les données simulées
+// This function decrypts the simulated data
 export function simulateDecryption(encryptedData: string): string {
   try {
-    // Décodage base64 et vérification du préfixe "demo:"
+    // Base64 decoding and verification of the "demo:" prefix
     const decoded = atob(encryptedData)
     if (!decoded.startsWith("demo:")) {
       throw new Error("Format de données invalide")
     }
-    return decoded.substring(5) // Enlever le préfixe "demo:"
+    return decoded.substring(5) // Remove the "demo:" prefix
   } catch (error: any) {
     console.error("Erreur lors du déchiffrement simulé:", error)
     throw new Error("Échec du déchiffrement des données")
   }
 }
 
-// Cette fonction chiffre les identifiants pour l'API
+// This function encrypts the credentials for the API
 export async function encryptCredentials(
   username: string,
   password: string,
@@ -57,7 +57,7 @@ export async function encryptCredentials(
   encryptedPassword: string
 }> {
   try {
-    // Pour le déploiement de démonstration, utiliser un chiffrement simulé
+    // For the demo deployment, use a simulated encryption
     const encryptedUsername = await simulateEncryption(username)
     const encryptedPassword = await simulateEncryption(password)
 
@@ -68,5 +68,27 @@ export async function encryptCredentials(
   } catch (error) {
     console.error("Erreur lors du chiffrement des identifiants:", error)
     throw new Error("Impossible de chiffrer les identifiants")
+  }
+}
+
+// This function decrypts the credentials
+export async function decryptCredentials(
+  encryptedUsername: string,
+  encryptedPassword: string,
+): Promise<{
+  decryptedUsername: string
+  decryptedPassword: string
+}> {
+  try {
+    const decryptedUsername = simulateDecryption(encryptedUsername)
+    const decryptedPassword = simulateDecryption(encryptedPassword)
+
+    return {
+      decryptedUsername,
+      decryptedPassword,
+    }
+  } catch (error) {
+    console.error("Erreur lors du déchiffrement des identifiants:", error)
+    throw new Error("Impossible de déchiffrer les identifiants")
   }
 }
