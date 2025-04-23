@@ -212,6 +212,12 @@ async function updateExtractionProgress(extractionId, status, message, progress,
   }
 }
 
+// Fonction de simulation de déchiffrement (à remplacer par une vraie fonction)
+function simulateDecryption(encryptedText) {
+  // Simuler le déchiffrement en inversant le texte
+  return encryptedText.split("").reverse().join("")
+}
+
 // Route pour l'extraction des votes en streaming
 app.post("/api/extract-votes-stream", async (req, res) => {
   console.log("Requête d'extraction en streaming reçue")
@@ -393,19 +399,29 @@ app.post("/api/extract-votes-stream", async (req, res) => {
         }
 
         // Déchiffrer les identifiants
-        // Note: Les identifiants sont déjà déchiffrés côté client, donc nous utilisons directement les valeurs
-        console.log("Remplissage des champs de connexion...")
+        console.log("Déchiffrement des identifiants...")
+        let username, password
+
+        try {
+          // Déchiffrer les identifiants simulés
+          username = simulateDecryption(credentials.encryptedUsername)
+          password = simulateDecryption(credentials.encryptedPassword)
+          console.log("Identifiants déchiffrés avec succès")
+        } catch (error) {
+          // Si le déchiffrement échoue, utiliser les identifiants tels quels
+          console.log("Échec du déchiffrement, utilisation des identifiants tels quels")
+          username = credentials.encryptedUsername
+          password = credentials.encryptedPassword
+        }
 
         // Remplir les champs de connexion
-        await page.type(usernameSelector, credentials.encryptedUsername)
-        await page.type(passwordSelector, credentials.encryptedPassword)
+        await page.type(usernameSelector, username)
+        await page.type(passwordSelector, password)
 
         // Ajouter ces lignes de débogage:
         console.log("Identifiants utilisés pour la connexion:")
-        console.log(`Username length: ${credentials.encryptedUsername.length}`)
-        console.log(`Password length: ${credentials.encryptedPassword.length}`)
-        console.log(`Premier caractère du username: ${credentials.encryptedUsername.charAt(0)}`)
-        console.log(`Premier caractère du password: ${credentials.encryptedPassword.charAt(0)}`)
+        console.log(`Username length: ${username.length}`)
+        console.log(`Password length: ${password.length}`)
 
         // Trouver le bouton de connexion
         const loginButtonSelector = await page.evaluate(() => {
