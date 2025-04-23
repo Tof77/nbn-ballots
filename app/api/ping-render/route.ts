@@ -3,6 +3,47 @@ import { NextResponse } from "next/server"
 export const runtime = "nodejs"
 export const maxDuration = 10
 
+// Fonction pour tenter un ping sur une URL spécifique
+async function attemptPing(url: string, label: string) {
+  try {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 5000) // 5 secondes
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+      },
+      signal: controller.signal,
+    })
+
+    // Nettoyer le timeout
+    clearTimeout(timeoutId)
+
+    // Lire le corps de la réponse
+    const responseText = await response.text()
+
+    console.log(`Ping ${label} - Statut: ${response.status}`)
+
+    return {
+      success: response.ok,
+      status: response.status,
+      statusText: response.statusText,
+      responseText: responseText.substring(0, 200),
+      url: url,
+    }
+  } catch (error) {
+    console.error(`Erreur lors du ping ${label}:`, error)
+    return {
+      success: false,
+      status: "error",
+      error: error instanceof Error ? error.message : String(error),
+      url: url,
+    }
+  }
+}
+
 export async function GET(request: Request) {
   try {
     // Récupérer l'URL de l'API Render depuis les variables d'environnement
@@ -16,8 +57,6 @@ export async function GET(request: Request) {
     }
 
     // Modifier la fonction pour essayer différentes routes de ping
-
-    // Remplacer la partie qui construit l'URL de ping par ceci:
     const pingUrl = `${renderApiUrl}/ping`
     const alternatePingUrl = `${renderApiUrl}/api/ping`
     const rootUrl = renderApiUrl
@@ -26,48 +65,6 @@ export async function GET(request: Request) {
 1. ${pingUrl}
 2. ${alternatePingUrl}
 3. ${rootUrl}`)
-
-    // Fonction pour tenter un ping sur une URL spécifique
-    async function attemptPing(url, label) {
-      try {
-        const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 5000) // 5 secondes
-
-        const response = await fetch(url, {
-          method: "GET",
-          headers: {
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            Pragma: "no-cache",
-            Expires: "0",
-          },
-          signal: controller.signal,
-        })
-
-        // Nettoyer le timeout
-        clearTimeout(timeoutId)
-
-        // Lire le corps de la réponse
-        const responseText = await response.text()
-
-        console.log(`Ping ${label} - Statut: ${response.status}`)
-
-        return {
-          success: response.ok,
-          status: response.status,
-          statusText: response.statusText,
-          responseText: responseText.substring(0, 200),
-          url: url,
-        }
-      } catch (error) {
-        console.error(`Erreur lors du ping ${label}:`, error)
-        return {
-          success: false,
-          status: "error",
-          error: error instanceof Error ? error.message : String(error),
-          url: url,
-        }
-      }
-    }
 
     // Tenter les pings sur toutes les URLs
     const results = await Promise.all([
