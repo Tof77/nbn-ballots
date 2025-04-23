@@ -1,3 +1,6 @@
+// Correction de l'erreur de syntaxe à la ligne 1546
+// L'erreur est dans la condition : } else if (header.includes("  {
+
 const express = require("express")
 const cors = require("cors")
 const puppeteer = require("puppeteer")
@@ -58,21 +61,6 @@ app.get("/screenshots", (req, res) => {
     res.status(500).json({ error: "Erreur lors de la récupération des captures d'écran", details: error.message })
   }
 })
-
-// Fonction pour déchiffrer les données simulées
-function simulateDecryption(encryptedData) {
-  try {
-    // Décodage base64 et vérification du préfixe "demo:"
-    const decoded = Buffer.from(encryptedData, "base64").toString("utf-8")
-    if (!decoded.startsWith("demo:")) {
-      throw new Error("Format de données invalide")
-    }
-    return decoded.substring(5) // Enlever le préfixe "demo:"
-  } catch (error) {
-    console.error("Erreur lors du déchiffrement simulé:", error)
-    throw new Error("Échec du déchiffrement des données")
-  }
-}
 
 // Fonction pour extraire le code de commission (ex: E088/089)
 function extractCommissionCode(commissionId) {
@@ -253,21 +241,6 @@ app.post("/api/extract-votes-stream", async (req, res) => {
       console.log(`URL de callback configurée: ${callbackUrl}`)
     }
 
-    let username, password
-
-    try {
-      // Déchiffrer les identifiants simulés
-      username = simulateDecryption(credentials.encryptedUsername)
-      password = simulateDecryption(credentials.encryptedPassword)
-      console.log("Identifiants déchiffrés avec succès")
-    } catch (error) {
-      console.error("Erreur lors du déchiffrement:", error)
-      return res.status(400).json({
-        error: "Échec du déchiffrement des identifiants",
-        details: error.message,
-      })
-    }
-
     // Extraire le code de commission
     const commissionCode = extractCommissionCode(commissionId)
     console.log("Code de commission extrait:", commissionCode)
@@ -419,6 +392,7 @@ app.post("/api/extract-votes-stream", async (req, res) => {
         }
 
         // Remplir les champs de connexion
+        const { encryptedUsername: username, encryptedPassword: password } = credentials;
         await page.type(usernameSelector, username)
         await page.type(passwordSelector, password)
 
@@ -1062,7 +1036,6 @@ app.post("/api/extract-votes-stream", async (req, res) => {
           debug: {
             receivedCommissionId: commissionId,
             extractedCommissionCode: commissionCode,
-            username: username,
             startDate: startDate,
             numVotesGenerated: extractedVotes.length,
             sessionId: sessionId,
@@ -1355,16 +1328,19 @@ app.post("/api/extract-votes-stream", async (req, res) => {
               console.log(`Le sélecteur ${dateSelector} n'existe pas sur la page`)
             }
           } else {
+            console.log("Aucun champ de  n'existe pas sur la page`)
+            }
+          } else {
             console.log("Aucun champ de date trouvé")
           }
         }
 
         // Rechercher le bouton de recherche
         const searchButtonInfo = await page.evaluate(() => {
-          const buttons = Array.from(document.querySelectorAll("button, input[type='submit'], input[type='button']"))
+          const buttons = Array.from(document.querySelectorAll("button, input[type='submit'], input[type='button']"))\
           return buttons
             .filter((button) => {
-              const text = (button.innerText || button.value || "").toLowerCase()
+              const text = (button.innerText || button.value || "").toLowerCase();
               return (
                 text.includes("search") ||
                 text.includes("recherche") ||
@@ -1543,15 +1519,13 @@ app.post("/api/extract-votes-stream", async (req, res) => {
                     }
                   } else if (header.includes("committee")) {
                     rowData.committee = text
-                  } else if (header.includes("  {
-                    rowData.committee = text
                   } else if (header.includes("vote")) {
                     rowData.votes = text
                   } else if (header.includes("result")) {
                     rowData.result = text
                   } else if (header.includes("status")) {
                     rowData.status = text
-                  } else if (header.includes("opening")) {\
+                  } else if (header.includes("opening")) {
                     rowData.openingDate = text
                   } else if (header.includes("closing")) {
                     rowData.closingDate = text
@@ -1579,11 +1553,12 @@ app.post("/api/extract-votes-stream", async (req, res) => {
               })
               .filter(Boolean) // Filtrer les lignes nulles
           })
-          .catch((e) => 
+          .catch((e) => {
             console.log(`Erreur lors de l'extraction alternative des résultats: ${e.message}`)
-            return [])
+            return []
+          })
 
-        console.log(`$votes.lengthvotes extraits par méthode alternative`)
+        console.log(`${votes.length} votes extraits par méthode alternative`)
         
         // Ajouter les votes au tableau des votes extraits
         extractedVotes.push(...votes)
@@ -1592,7 +1567,7 @@ app.post("/api/extract-votes-stream", async (req, res) => {
         await updateExtractionProgress(
           extractionId, 
           "in-progress", 
-          `$votes.lengthvotes extraits (méthode alternative)`, 
+          `${votes.length} votes extraits (méthode alternative)`, 
           80,
           votes
         )
@@ -1610,7 +1585,6 @@ app.post("/api/extract-votes-stream", async (req, res) => {
           debug: {
             receivedCommissionId: commissionId,
             extractedCommissionCode: commissionCode,
-            username: username,
             startDate: startDate,
             numVotesGenerated: extractedVotes.length,
             alternativeMethod: true,
@@ -1629,7 +1603,7 @@ app.post("/api/extract-votes-stream", async (req, res) => {
       }
       
       // Marquer l'extraction comme échouée
-      await updateExtractionProgress(extractionId, "failed", `Erreur: $error.message`, 0)
+      await updateExtractionProgress(extractionId, "failed", `Erreur: ${error.message}`, 0)
 
       return res.status(500).json({
         error: "Erreur lors de l'extraction des votes",
@@ -1648,7 +1622,7 @@ app.post("/api/extract-votes-stream", async (req, res) => {
     
     // Marquer l'extraction comme échouée
     if (extractionId) {
-      await updateExtractionProgress(extractionId, "failed", `Erreur générale: $error.message`, 0)
+      await updateExtractionProgress(extractionId, "failed", `Erreur générale: ${error.message}`, 0)
     }
 
     return res.status(500).json({
@@ -1660,6 +1634,8 @@ app.post("/api/extract-votes-stream", async (req, res) => {
 })
 
 // Démarrer le serveur
-app.listen(port, () => {
-  console.log(`API NBN Ballots en écoute sur le port $port`)
-})
+app.listen(port, () =>
+{
+  console.log(`API NBN Ballots en écoute sur le port ${port}`)
+}
+)
