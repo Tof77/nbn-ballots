@@ -70,6 +70,8 @@ interface Credentials {
   password?: string // pour permettre leur ajout après le chiffrement
 }
 
+// Ajouter une fonction pour vérifier l'URL de l'API Render
+
 // Ajouter une nouvelle fonction pour réchauffer l'API Render avant l'extraction
 async function warmupRenderApi(queryParams = ""): Promise<WarmupResult> {
   try {
@@ -144,6 +146,47 @@ async function warmupRenderApi(queryParams = ""): Promise<WarmupResult> {
       message: error instanceof Error ? error.message : String(error),
       statusCode: 0,
     }
+  }
+}
+
+// Ajouter cette fonction après la fonction warmupRenderApi
+async function checkRenderApiEndpoints(): Promise<{
+  validEndpoint: string | null
+  allResults: any[]
+}> {
+  try {
+    console.log("Vérification des endpoints de l'API Render...")
+    const response = await fetch(`/api/ping-render`, {
+      headers: {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        Pragma: "no-cache",
+        Expires: "0",
+      },
+    })
+
+    if (!response.ok) {
+      console.error("Erreur lors de la vérification des endpoints:", response.status)
+      return { validEndpoint: null, allResults: [] }
+    }
+
+    const data = await response.json()
+    console.log("Résultats de la vérification des endpoints:", data)
+
+    // Si un ping a réussi, retourner l'URL correspondante
+    if (data.success && data.allResults) {
+      const successfulResult = data.allResults.find((result) => result.success)
+      if (successfulResult) {
+        return {
+          validEndpoint: successfulResult.url,
+          allResults: data.allResults,
+        }
+      }
+    }
+
+    return { validEndpoint: null, allResults: data.allResults || [] }
+  } catch (error) {
+    console.error("Erreur lors de la vérification des endpoints:", error)
+    return { validEndpoint: null, allResults: [] }
   }
 }
 
@@ -242,6 +285,10 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const router = useRouter()
 
+  // Ajouter un nouvel état pour stocker l'URL valide
+  const [validRenderEndpoint, setValidRenderEndpoint] = useState<string | null>(null)
+  const [endpointCheckResults, setEndpointCheckResults] = useState<any[]>([])
+
   // Vérifier que la clé publique est disponible au chargement du composant
   useEffect(() => {
     async function checkPublicKey() {
@@ -263,6 +310,26 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
   // Vérifier l'état de l'API Render au chargement
   useEffect(() => {
     checkRenderApiStatus()
+  }, [])
+
+  // Ajouter un effet pour vérifier les endpoints au chargement
+  useEffect(() => {
+    async function verifyEndpoints() {
+      const { validEndpoint, allResults } = await checkRenderApiEndpoints()
+      setValidRenderEndpoint(validEndpoint)
+      setEndpointCheckResults(allResults)
+
+      // Mettre à jour le debugInfo
+      setDebugInfo(
+        (prev) => `${prev || ""}
+      
+Vérification des endpoints de l'API Render:
+Endpoint valide trouvé: ${validEndpoint || "Aucun"}
+Résultats: ${JSON.stringify(allResults, null, 2)}`,
+      )
+    }
+
+    verifyEndpoints()
   }, [])
 
   // Effet pour la tentative automatique de reconnexion
@@ -677,6 +744,67 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
         ? getHttpErrorInfo(renderApiStatus.statusCode)
         : null
 
+    // Ajouter un bouton pour vérifier les endpoints
+    const renderEndpointCheckButton = () => {
+      if (endpointCheckResults.length === 0) return null
+
+      return (
+        <div className="mt-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowErrorDetails(!showErrorDetails)}
+            className="text-xs w-full flex items-center justify-center"
+          >
+            {showErrorDetails ? "Masquer les détails des endpoints" : "Afficher les détails des endpoints"}
+            {showErrorDetails ? (
+              <ChevronUpIcon className="h-3 w-3 ml-1" />
+            ) : (
+              <ChevronDownIcon className="h-3 w-3 ml-1" />
+            )}
+          </Button>
+
+          {showErrorDetails && (
+            <div className="mt-2 p-2 bg-gray-50 rounded-md text-xs">
+              <p className="font-medium mb-1">Résultats de la vérification des endpoints:</p>
+              <ul className="list-disc pl-4 mt-1">
+                {endpointCheckResults.map((result, index) => (
+                  <li key={index} className={result.success ? "text-green-600" : "text-red-600"}>
+                    {result.url}: {result.success ? "Succès" : "Échec"}
+                    {result.status && ` (${result.status})`}
+                    {result.responseText && (
+                      <div className="ml-4 mt-1 p-1 bg-gray-100 rounded text-gray-700 text-xs">
+                        <code>
+                          {result.responseText.substring(0, 100)}
+                          {result.responseText.length > 100 ? "..." : ""}
+                        </code>
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+
+              {validRenderEndpoint ? (
+                <div className="mt-2 p-2 bg-green-50 rounded border border-green-200">
+                  <p className="font-medium text-green-700">Endpoint valide trouvé: {validRenderEndpoint}</p>
+                </div>
+              ) : (
+                <div className="mt-2 p-2 bg-red-50 rounded border border-red-200">
+                  <p className="font-medium text-red-700">Aucun endpoint valide trouvé</p>
+                  <p className="mt-1">Suggestions:</p>
+                  <ul className="list-disc pl-4 mt-1">
+                    <li>Vérifier que le service Render est démarré</li>
+                    <li>Vérifier la variable d'environnement RENDER_API_URL</li>
+                    <li>Vérifier que l'endpoint /ping ou /api/ping existe sur le service Render</li>
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )
+    }
+
     return (
       <div className={`flex flex-col gap-2 p-2 rounded-md border ${getStatusClass()} text-sm mb-4`}>
         <div className="flex items-center gap-2">
@@ -771,6 +899,7 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
             )}
           </div>
         )}
+        {renderEndpointCheckButton()}
       </div>
     )
   }
