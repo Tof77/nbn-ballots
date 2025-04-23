@@ -30,6 +30,9 @@ interface VoteDetail {
   date: string
 }
 
+// Type pour le statut d'extraction
+type ExtractionStatus = "pending" | "in-progress" | "completed" | "failed"
+
 // Map pour stocker temporairement les données d'extraction
 // Note: Cette map sera réinitialisée à chaque redéploiement ou redémarrage
 const extractionsCache = new Map<
@@ -37,9 +40,8 @@ const extractionsCache = new Map<
   {
     votes: Vote[]
     lastUpdated: number
-    status: "pending" | "in-progress" | "completed" | "failed"
+    status: ExtractionStatus
     message?: string
-    demoMode: boolean
   }
 >()
 
@@ -79,7 +81,6 @@ export async function GET(req: NextRequest) {
           status: cachedData.status,
           votes: cachedData.votes,
           message: cachedData.message || "Extraction en cours...",
-          demoMode: cachedData.demoMode,
           votesCount: cachedData.votes.length,
           progress,
         })
@@ -91,61 +92,19 @@ export async function GET(req: NextRequest) {
         status: cachedData.status,
         votes: cachedData.votes,
         message: cachedData.message,
-        demoMode: cachedData.demoMode,
         votesCount: cachedData.votes.length,
         progress: cachedData.status === "completed" ? 100 : 0,
       })
     }
 
-    // Si nous n'avons pas de données en cache, simuler des données
-    console.log(`Pas de données en cache pour ${extractionId}, simulation de données`)
-
-    // Générer des votes simulés basés sur l'ID d'extraction
-    const seed = extractionId.split("-")[1] || Date.now().toString()
-    const numVotes = (Number.parseInt(seed) % 10) + 5 // Entre 5 et 15 votes
-
-    // Simuler une progression basée sur le temps écoulé
-    const startTime = Number.parseInt(seed)
-    const elapsedTime = Date.now() - startTime
-    const progress = Math.min(100, Math.floor((elapsedTime / 30000) * 100)) // 30 secondes pour compléter
-
-    // Déterminer combien de votes ont été "extraits" jusqu'à présent
-    const votesExtracted = Math.floor((progress / 100) * numVotes)
-
-    // Générer les votes
-    const votes: Vote[] = []
-    for (let i = 0; i < votesExtracted; i++) {
-      votes.push(createSimulatedVote(i, "Buildwise/E088/089", "2025-01-01", true))
-    }
-
-    // Déterminer le statut
-    let status: "pending" | "in-progress" | "completed" | "failed" = "in-progress"
-    if (progress >= 100) {
-      status = "completed"
-    } else if (progress < 5) {
-      status = "pending"
-    }
-
-    // Stocker les données en cache
-    extractionsCache.set(extractionId, {
-      votes,
-      lastUpdated: Date.now(),
-      status,
-      message: status === "completed" ? "Extraction terminée avec succès" : "Extraction en cours...",
-      demoMode: true,
-    })
-
-    return NextResponse.json({
-      id: extractionId,
-      status,
-      votes,
-      startTime,
-      endTime: status === "completed" ? Date.now() : undefined,
-      message: status === "completed" ? "Extraction terminée avec succès" : "Extraction en cours...",
-      demoMode: true,
-      votesCount: votes.length,
-      progress,
-    })
+    // Si nous n'avons pas de données en cache, retourner une erreur
+    return NextResponse.json(
+      {
+        error: "Extraction non trouvée ou expirée",
+        message: "Aucune donnée disponible pour cette extraction. Veuillez réessayer.",
+      },
+      { status: 404 },
+    )
   } catch (error: any) {
     console.error("Erreur lors de la récupération de l'extraction:", error)
     return NextResponse.json(
@@ -153,56 +112,6 @@ export async function GET(req: NextRequest) {
       { status: 500 },
     )
   }
-}
-
-// Fonction pour créer un vote simulé
-function createSimulatedVote(index: number, commissionId: string, startDate: string, extractDetails: boolean): Vote {
-  const closingDate = new Date(startDate || "2025-01-01")
-  closingDate.setDate(closingDate.getDate() + index * 7 + Math.floor(Math.random() * 10))
-
-  const openingDate = new Date(closingDate)
-  openingDate.setDate(openingDate.getDate() - 30)
-
-  const vote: Vote = {
-    id: `vote-${index + 1}`,
-    ref: `prEN ${1000 + index}`,
-    title: `Standard for Demo - Part ${index + 1}`,
-    committee: commissionId,
-    votes: index % 2 === 0 ? `${(index % 3) + 1} votes` : "",
-    result: index % 3 === 0 ? "Disapproved" : "Approved",
-    status: index === 0 ? "Ongoing" : "Closed",
-    openingDate: openingDate.toISOString().split("T")[0],
-    closingDate: closingDate.toISOString().split("T")[0],
-    role: "Ballot owner",
-    sourceType: index % 2 === 0 ? "ISO" : "CEN",
-    source: `ISO/TC ${200 + index}/SC ${index + 1}`,
-    voteDetails: [],
-  }
-
-  // Ajouter des détails de vote si demandé
-  if (extractDetails && vote.votes) {
-    const numVoteDetails = Number.parseInt(vote.votes.split(" ")[0]) || 0
-    const voteDetails: VoteDetail[] = []
-
-    const countries = ["Belgium", "France", "Germany", "Netherlands", "Italy"]
-    const voteOptions = ["Approve", "Approve with comments", "Disapprove", "Abstain"]
-
-    for (let j = 0; j < numVoteDetails; j++) {
-      const voteDate = new Date(vote.openingDate)
-      voteDate.setDate(voteDate.getDate() + Math.floor(Math.random() * 20) + 1)
-
-      voteDetails.push({
-        participant: countries[j % countries.length],
-        vote: vote.result === "Approved" ? voteOptions[0] : voteOptions[2],
-        castBy: `User ${j + 1}`,
-        date: voteDate.toISOString().split("T")[0],
-      })
-    }
-
-    vote.voteDetails = voteDetails
-  }
-
-  return vote
 }
 
 // Endpoint pour recevoir des mises à jour de l'API Render
@@ -220,8 +129,7 @@ export async function POST(req: NextRequest) {
     const existingData = extractionsCache.get(data.extractionId) || {
       votes: [],
       lastUpdated: Date.now(),
-      status: "in-progress" as const,
-      demoMode: false,
+      status: "in-progress" as ExtractionStatus,
     }
 
     // Mettre à jour l'extraction avec les nouvelles données
