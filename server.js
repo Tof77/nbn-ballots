@@ -400,6 +400,13 @@ app.post("/api/extract-votes-stream", async (req, res) => {
         await page.type(usernameSelector, credentials.encryptedUsername)
         await page.type(passwordSelector, credentials.encryptedPassword)
 
+        // Ajouter ces lignes de débogage:
+        console.log("Identifiants utilisés pour la connexion:")
+        console.log(`Username length: ${credentials.encryptedUsername.length}`)
+        console.log(`Password length: ${credentials.encryptedPassword.length}`)
+        console.log(`Premier caractère du username: ${credentials.encryptedUsername.charAt(0)}`)
+        console.log(`Premier caractère du password: ${credentials.encryptedPassword.charAt(0)}`)
+
         // Trouver le bouton de connexion
         const loginButtonSelector = await page.evaluate(() => {
           const selectors = [
