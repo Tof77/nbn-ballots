@@ -1337,7 +1337,8 @@ app.post("/api/extract-votes-stream", async (req, res) => {
 
         // Rechercher le bouton de recherche
         const searchButtonInfo = await page.evaluate(() => {
-          const buttons = Array.from(document.querySelectorAll("button, input[type='submit'], input[type='button']"))\
+          const buttons = Array.from(document.querySelectorAll("button, input[type='submit'], input[type='button']"))
+\
           return buttons
             .filter((button) => {
               const text = (button.innerText || button.value || "").toLowerCase();
