@@ -25,46 +25,103 @@ export async function POST(req: NextRequest): Promise<Response> {
 
     // Déterminer l'URL de l'API Render
     const renderApiUrl = process.env.RENDER_API_URL || "http://localhost:3001"
+    console.log(`URL de l'API Render: ${renderApiUrl}`)
+
+    // Construire l'URL complète
+    const extractionEndpoint = `${renderApiUrl}/extract-votes`
+    console.log(`URL complète de l'endpoint d'extraction: ${extractionEndpoint}`)
+
+    // Construire l'URL de callback
+    const callbackUrl =
+      process.env.VERCEL_CALLBACK_URL ||
+      `${process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000"}/api/extraction-stream`
+    console.log(`URL de callback: ${callbackUrl}`)
+
+    // Préparer les données à envoyer
+    const renderRequestData = {
+      username,
+      password,
+      commissionId,
+      startDate,
+      extractDetails,
+      extractionId,
+      callbackUrl,
+    }
 
     // Envoyer une requête à l'API Render pour démarrer l'extraction
-    // Note: Dans un environnement de développement, cela peut être simulé
     try {
-      console.log(`Tentative de connexion à l'API Render: ${renderApiUrl}/extract-votes`)
+      console.log(`Tentative de connexion à l'API Render: ${extractionEndpoint}`)
 
-      const renderResponse = await fetch(`${renderApiUrl}/extract-votes`, {
+      const renderResponse = await fetch(extractionEndpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          username,
-          password,
-          commissionId,
-          startDate,
-          extractDetails,
-          extractionId,
-          callbackUrl:
-            process.env.VERCEL_CALLBACK_URL ||
-            `${process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000"}/api/extraction-stream`,
-        }),
+        body: JSON.stringify(renderRequestData),
       })
 
-      const renderData = await renderResponse.json()
-
+      // Vérifier si la réponse est OK
       if (!renderResponse.ok) {
-        console.error("Erreur de l'API Render:", renderData)
+        console.error(`Erreur HTTP de l'API Render: ${renderResponse.status} ${renderResponse.statusText}`)
+
+        // Lire le corps de la réponse
+        const responseText = await renderResponse.text()
+        console.error("Corps de la réponse:", responseText.substring(0, 500))
+
+        // Essayer de parser comme JSON si possible
+        let errorData = { error: `Erreur HTTP ${renderResponse.status}` }
+        try {
+          if (responseText.trim().startsWith("{")) {
+            errorData = JSON.parse(responseText)
+          } else {
+            // Si ce n'est pas du JSON, ajouter le texte brut comme détail
+            errorData.details = responseText.substring(0, 200) + (responseText.length > 200 ? "..." : "")
+          }
+        } catch (parseError) {
+          console.error("Impossible de parser la réponse comme JSON:", parseError)
+          errorData.details = responseText.substring(0, 200) + (responseText.length > 200 ? "..." : "")
+        }
+
         return NextResponse.json(
-          { error: renderData.error || "Erreur lors de la connexion à l'API d'extraction" },
-          { status: renderResponse.status },
+          {
+            error: errorData.error || `Erreur HTTP ${renderResponse.status} lors de la connexion à l'API d'extraction`,
+            details: errorData.details,
+            status: renderResponse.status,
+          },
+          { status: 500 },
         )
       }
 
-      console.log("Réponse de l'API Render:", renderData)
+      // Lire le corps de la réponse
+      const responseText = await renderResponse.text()
+      console.log("Réponse brute de l'API Render:", responseText.substring(0, 500))
+
+      // Essayer de parser la réponse comme JSON
+      let renderData
+      try {
+        renderData = JSON.parse(responseText)
+      } catch (parseError) {
+        console.error("Erreur lors du parsing de la réponse JSON:", parseError)
+        console.error("Réponse brute:", responseText.substring(0, 500))
+
+        // Si nous ne pouvons pas parser la réponse comme JSON, retourner une erreur
+        return NextResponse.json(
+          {
+            error: "La réponse de l'API Render n'est pas un JSON valide",
+            details: responseText.substring(0, 200) + (responseText.length > 200 ? "..." : ""),
+            extractionId, // Retourner quand même l'ID d'extraction pour permettre le polling
+          },
+          { status: 207 },
+        ) // 207 Multi-Status pour indiquer un succès partiel
+      }
+
+      console.log("Réponse JSON de l'API Render:", renderData)
 
       // Retourner l'ID d'extraction au client
       return NextResponse.json({
         extractionId,
         message: "Extraction démarrée avec succès",
+        renderResponse: renderData,
       })
     } catch (error: any) {
       console.error("Erreur lors de la connexion à l'API Render:", error)
@@ -82,17 +139,47 @@ export async function POST(req: NextRequest): Promise<Response> {
         return NextResponse.json({
           extractionId,
           message: "Extraction démarrée (simulation en mode développement)",
+          error: error.message,
+          details: "Erreur ignorée en mode développement",
         })
       }
 
+      // Vérifier si l'erreur est due à une URL invalide
+      if (
+        error.message &&
+        (error.message.includes("ENOTFOUND") ||
+          error.message.includes("ECONNREFUSED") ||
+          error.message.includes("Invalid URL"))
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Impossible de se connecter à l'API Render. L'URL est peut-être incorrecte ou le service est indisponible.",
+            details: error.message,
+            renderApiUrl,
+            extractionEndpoint,
+          },
+          { status: 503 },
+        ) // Service Unavailable
+      }
+
       return NextResponse.json(
-        { error: `Erreur lors de la connexion à l'API d'extraction: ${error.message}` },
+        {
+          error: `Erreur lors de la connexion à l'API d'extraction: ${error.message}`,
+          details: error.stack,
+        },
         { status: 500 },
       )
     }
   } catch (error: any) {
     console.error("Erreur lors du démarrage de l'extraction:", error)
-    return NextResponse.json({ error: `Erreur lors du démarrage de l'extraction: ${error.message}` }, { status: 500 })
+    return NextResponse.json(
+      {
+        error: `Erreur lors du démarrage de l'extraction: ${error.message}`,
+        details: error.stack,
+      },
+      { status: 500 },
+    )
   }
 }
 
