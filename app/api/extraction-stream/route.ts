@@ -115,7 +115,7 @@ export async function GET(req: NextRequest) {
 }
 
 // Endpoint pour recevoir des mises à jour de l'API Render
-export async function POST(req: NextRequest) {
+export async function POST(req: NextRequest): Promise<Response> {
   try {
     const data = await req.json()
     console.log("Mise à jour reçue de l'API Render:", data)
