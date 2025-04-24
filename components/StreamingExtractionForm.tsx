@@ -41,6 +41,14 @@ interface WarmupResult {
   responseText?: string
 }
 
+// Interface pour les résultats des endpoints
+interface EndpointResult {
+  url: string
+  success: boolean
+  statusCode?: number
+  message?: string
+}
+
 // Interface pour les props du composant
 interface StreamingExtractionFormProps {
   onVoteReceived: (vote: any) => void
@@ -260,7 +268,11 @@ export default function StreamingExtractionForm({
       }
 
       console.log("Données envoyées à l'API:", debugRequestData)
-      setDebugInfo((prev) => `${prev || ""}\n\nDonnées envoyées à l'API: ${JSON.stringify(debugRequestData, null, 2)}`)
+      setDebugInfo(
+        (prev) => `${prev || ""}
+
+Données envoyées à l'API: ${JSON.stringify(debugRequestData, null, 2)}`,
+      )
 
       // Démarrer l'extraction
       const response = await fetch("/api/extraction-start", {
@@ -292,7 +304,11 @@ export default function StreamingExtractionForm({
 
       const data = await response.json()
       console.log("Réponse de l'API extraction-start:", data)
-      setDebugInfo((prev) => `${prev || ""}\n\nRéponse de l'API extraction-start: ${JSON.stringify(data, null, 2)}`)
+      setDebugInfo(
+        (prev) => `${prev || ""}
+
+Réponse de l'API extraction-start: ${JSON.stringify(data, null, 2)}`,
+      )
 
       if (!data.extractionId) {
         setError("Aucun ID d'extraction reçu")
@@ -309,14 +325,22 @@ export default function StreamingExtractionForm({
 
       eventSource.onopen = () => {
         console.log("Connexion SSE établie")
-        setDebugInfo((prev) => `${prev || ""}\n\nConnexion SSE établie`)
+        setDebugInfo(
+          (prev) => `${prev || ""}
+
+Connexion SSE établie`,
+        )
       }
 
       eventSource.onmessage = (event) => {
         try {
           const eventData = JSON.parse(event.data)
           console.log("Mise à jour SSE reçue:", eventData)
-          setDebugInfo((prev) => `${prev || ""}\n\nMise à jour SSE reçue: ${JSON.stringify(eventData, null, 2)}`)
+          setDebugInfo(
+            (prev) => `${prev || ""}
+
+Mise à jour SSE reçue: ${JSON.stringify(eventData, null, 2)}`,
+          )
 
           // Mettre à jour la progression
           if (eventData.progress !== undefined) {
@@ -344,13 +368,21 @@ export default function StreamingExtractionForm({
           }
         } catch (error) {
           console.error("Erreur lors du traitement des données SSE:", error)
-          setDebugInfo((prev) => `${prev || ""}\n\nErreur lors du traitement des données SSE: ${error}`)
+          setDebugInfo(
+            (prev) => `${prev || ""}
+
+Erreur lors du traitement des données SSE: ${error}`,
+          )
         }
       }
 
       eventSource.onerror = (error) => {
         console.error("Erreur SSE:", error)
-        setDebugInfo((prev) => `${prev || ""}\n\nErreur SSE: ${JSON.stringify(error)}`)
+        setDebugInfo(
+          (prev) => `${prev || ""}
+
+Erreur SSE: ${JSON.stringify(error)}`,
+        )
 
         // Fermer la connexion en cas d'erreur
         eventSource.close()
@@ -374,7 +406,9 @@ export default function StreamingExtractionForm({
       ) {
         setError("Échec de l'authentification. Veuillez vérifier vos identifiants ISO et réessayer.")
         setDebugInfo(
-          (prev) => `${prev || ""}\n\nErreur d'authentification détectée. Veuillez vérifier vos identifiants ISO.`,
+          (prev) => `${prev || ""}
+
+Erreur d'authentification détectée. Veuillez vérifier vos identifiants ISO.`,
         )
       } else {
         setError(error.message || "Une erreur est survenue")
