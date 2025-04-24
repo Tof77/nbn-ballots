@@ -3,6 +3,14 @@ import { type NextRequest, NextResponse } from "next/server"
 // Définir le runtime Node.js pour cette route API
 export const runtime = "nodejs"
 
+// Type pour les réponses de ping personnalisées
+interface CustomPingResponse {
+  ok: boolean
+  status: number
+  statusText: string
+  text?: () => Promise<string>
+}
+
 export async function GET(req: NextRequest): Promise<Response> {
   try {
     // Récupérer les variables d'environnement liées à Render
@@ -88,13 +96,18 @@ export async function GET(req: NextRequest): Promise<Response> {
             cache: "no-store",
           }).catch((error) => {
             console.error(`Erreur lors du ping de ${pingUrl}:`, error)
-            return { ok: false, status: 0, statusText: error.message }
+            return {
+              ok: false,
+              status: 0,
+              statusText: error.message,
+            } as CustomPingResponse
           })
 
           // Récupérer le texte de la réponse si possible
           let pingResponseText = ""
           try {
-            if (pingResponse.text) {
+            // Vérifier si c'est une vraie réponse fetch avec la méthode text()
+            if ("text" in pingResponse && typeof pingResponse.text === "function") {
               pingResponseText = await pingResponse.text()
             }
           } catch (error) {
