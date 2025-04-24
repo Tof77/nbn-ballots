@@ -1,9 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import VoteExtractionForm from "@/components/VoteExtractionForm"
 import StreamingExtractionForm from "@/components/StreamingExtractionForm"
-import ResultsDisplay from "@/components/ResultsDisplay"
 
 interface ScreenshotInfo {
   name: string
@@ -57,38 +55,19 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-100 p-4">
-      <h1 className="text-2xl font-bold text-center mb-6">NBN Ballots - Extraction automatique</h1>
+    <main className="flex min-h-screen flex-col items-center justify-between p-4 md:p-24">
+      <div className="z-10 w-full max-w-5xl items-center justify-between font-mono text-sm">
+        <h1 className="text-3xl font-bold text-center mb-8">NBN Ballots Extractor</h1>
 
-      <div className="max-w-6xl mx-auto">
-        <div className="mb-4 flex justify-end">
-          <button
-            className={`px-4 py-2 rounded-md text-sm font-medium ${useStreamingExtraction ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-800"}`}
-            onClick={() => setUseStreamingExtraction(true)}
-          >
-            Mode streaming
-          </button>
-          <button
-            className={`ml-2 px-4 py-2 rounded-md text-sm font-medium ${!useStreamingExtraction ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-800"}`}
-            onClick={() => setUseStreamingExtraction(false)}
-          >
-            Mode standard
-          </button>
-        </div>
-
-        {useStreamingExtraction ? (
+        <div className="mb-8">
           <StreamingExtractionForm
             onVoteReceived={handleVoteReceived}
             onExtractionComplete={handleExtractionComplete}
             onExtractionStart={handleExtractionStart}
             onError={handleError}
           />
-        ) : (
-          <VoteExtractionForm onResultsReceived={handleResultsReceived} />
-        )}
-
-        {results.length > 0 && <ResultsDisplay results={results} screenshotUrls={screenshotUrls} />}
+        </div>
       </div>
-    </div>
+    </main>
   )
 }
