@@ -31,17 +31,18 @@ export async function POST(req: NextRequest): Promise<Response> {
     console.log(`Nouvelle extraction démarrée: ${extractionId}`)
 
     // Déterminer l'URL de l'API Render
-    const renderApiUrl = process.env.RENDER_API_URL || "http://localhost:3001"
+    const renderApiUrl = process.env.RENDER_API_URL || "https://nbn-ballots-api.onrender.com"
     console.log(`URL de l'API Render: ${renderApiUrl}`)
 
-    // Construire l'URL complète
-    const extractionEndpoint = `${renderApiUrl}/extract-votes`
+    // Construire l'URL complète - Essayer différents endpoints possibles
+    // Modifier cette ligne pour utiliser l'endpoint correct
+    const extractionEndpoint = `${renderApiUrl}/api/extract-votes` // Essayer avec /api/ préfixe
     console.log(`URL complète de l'endpoint d'extraction: ${extractionEndpoint}`)
 
     // Construire l'URL de callback
     const callbackUrl =
       process.env.VERCEL_CALLBACK_URL ||
-      `${process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000"}/api/extraction-stream`
+      `${process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "https://nbn-ballots.vercel.app"}/api/extraction-stream`
     console.log(`URL de callback: ${callbackUrl}`)
 
     // Préparer les données à envoyer
@@ -75,6 +76,55 @@ export async function POST(req: NextRequest): Promise<Response> {
         const responseText = await renderResponse.text()
         console.error("Corps de la réponse:", responseText.substring(0, 500))
 
+        // Si c'est une erreur 404, essayer avec un autre endpoint
+        if (renderResponse.status === 404) {
+          // Essayer avec un autre endpoint
+          const alternativeEndpoint = `${renderApiUrl}/api/extract-votes`
+          if (alternativeEndpoint !== extractionEndpoint) {
+            console.log(`Tentative avec un endpoint alternatif: ${alternativeEndpoint}`)
+
+            const alternativeResponse = await fetch(alternativeEndpoint, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(renderRequestData),
+            })
+
+            if (alternativeResponse.ok) {
+              // Si ça fonctionne, lire la réponse et la retourner
+              const alternativeData = await alternativeResponse.json()
+              console.log("Réponse de l'endpoint alternatif:", alternativeData)
+
+              return NextResponse.json({
+                extractionId,
+                message: "Extraction démarrée avec succès (endpoint alternatif)",
+                renderResponse: alternativeData,
+                alternativeEndpoint,
+              })
+            } else {
+              // Si ça ne fonctionne toujours pas, ajouter cette information à l'erreur
+              const alternativeText = await alternativeResponse.text()
+              console.error("Corps de la réponse alternative:", alternativeText.substring(0, 500))
+
+              return NextResponse.json(
+                {
+                  error: "Les endpoints d'extraction ne sont pas disponibles",
+                  details: "Ni l'endpoint principal ni l'endpoint alternatif n'ont fonctionné",
+                  originalEndpoint: extractionEndpoint,
+                  alternativeEndpoint,
+                  originalStatus: renderResponse.status,
+                  alternativeStatus: alternativeResponse.status,
+                  originalResponse: responseText.substring(0, 200),
+                  alternativeResponse: alternativeText.substring(0, 200),
+                  suggestion: "Utilisez /api/render-endpoints pour découvrir les endpoints disponibles",
+                },
+                { status: 404 },
+              )
+            }
+          }
+        }
+
         // Essayer de parser comme JSON si possible
         let errorData: ErrorData = { error: `Erreur HTTP ${renderResponse.status}` }
         try {
@@ -94,6 +144,7 @@ export async function POST(req: NextRequest): Promise<Response> {
             error: errorData.error || `Erreur HTTP ${renderResponse.status} lors de la connexion à l'API d'extraction`,
             details: errorData.details,
             status: renderResponse.status,
+            suggestion: "Utilisez /api/render-endpoints pour découvrir les endpoints disponibles",
           },
           { status: 500 },
         )
@@ -165,6 +216,7 @@ export async function POST(req: NextRequest): Promise<Response> {
             details: error.message,
             renderApiUrl,
             extractionEndpoint,
+            suggestion: "Utilisez /api/render-endpoints pour découvrir les endpoints disponibles",
           },
           { status: 503 },
         ) // Service Unavailable
@@ -174,6 +226,7 @@ export async function POST(req: NextRequest): Promise<Response> {
         {
           error: `Erreur lors de la connexion à l'API d'extraction: ${error.message}`,
           details: error.stack,
+          suggestion: "Utilisez /api/render-endpoints pour découvrir les endpoints disponibles",
         },
         { status: 500 },
       )
@@ -182,8 +235,8 @@ export async function POST(req: NextRequest): Promise<Response> {
     console.error("Erreur lors du démarrage de l'extraction:", error)
     return NextResponse.json(
       {
-        error: `Erreur lors du démarrage de l'extraction: ${error.message}`,
-        details: error.stack,
+        error: `Erreur lors du démarrage de l'extraction: ${error instanceof Error ? error.message : String(error)}`,
+        details: error instanceof Error ? error.stack : undefined,
       },
       { status: 500 },
     )
@@ -193,7 +246,7 @@ export async function POST(req: NextRequest): Promise<Response> {
 // Fonction pour simuler des mises à jour d'extraction en mode développement
 async function simulateExtractionUpdate(extractionId: string) {
   try {
-    const callbackUrl = process.env.VERCEL_CALLBACK_URL || "http://localhost:3000/api/extraction-stream"
+    const callbackUrl = process.env.VERCEL_CALLBACK_URL || "https://nbn-ballots.vercel.app/api/extraction-stream"
 
     // Simuler quelques votes
     const sampleVotes = [
