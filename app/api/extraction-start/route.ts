@@ -4,6 +4,13 @@ import { v4 as uuidv4 } from "uuid"
 // Définir le runtime Node.js pour cette route API
 export const runtime = "nodejs"
 
+// Définir l'interface pour les données d'erreur
+interface ErrorData {
+  error: string
+  details?: string
+  status?: number
+}
+
 export async function POST(req: NextRequest): Promise<Response> {
   try {
     // Récupérer les données depuis le corps de la requête
@@ -69,10 +76,10 @@ export async function POST(req: NextRequest): Promise<Response> {
         console.error("Corps de la réponse:", responseText.substring(0, 500))
 
         // Essayer de parser comme JSON si possible
-        let errorData = { error: `Erreur HTTP ${renderResponse.status}` }
+        let errorData: ErrorData = { error: `Erreur HTTP ${renderResponse.status}` }
         try {
           if (responseText.trim().startsWith("{")) {
-            errorData = JSON.parse(responseText)
+            errorData = JSON.parse(responseText) as ErrorData
           } else {
             // Si ce n'est pas du JSON, ajouter le texte brut comme détail
             errorData.details = responseText.substring(0, 200) + (responseText.length > 200 ? "..." : "")
