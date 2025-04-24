@@ -99,7 +99,7 @@ export async function GET(req: NextRequest): Promise<Response> {
             return {
               ok: false,
               status: 0,
-              statusText: error.message,
+              statusText: error instanceof Error ? error.message : String(error),
             } as CustomPingResponse
           })
 
@@ -130,7 +130,7 @@ export async function GET(req: NextRequest): Promise<Response> {
             name: urlInfo.name,
             url: urlInfo.url,
             extractionUrl: urlInfo.extractionUrl,
-            error: error.message,
+            error: error instanceof Error ? error.message : String(error),
           }
         }
       }),
@@ -153,8 +153,8 @@ export async function GET(req: NextRequest): Promise<Response> {
     console.error("Erreur lors du diagnostic Render:", error)
     return NextResponse.json(
       {
-        error: `Erreur lors du diagnostic Render: ${error.message}`,
-        details: error.stack,
+        error: `Erreur lors du diagnostic Render: ${error instanceof Error ? error.message : String(error)}`,
+        details: error instanceof Error ? error.stack : undefined,
       },
       { status: 500 },
     )
