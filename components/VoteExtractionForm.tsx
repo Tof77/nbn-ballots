@@ -297,6 +297,49 @@ export default function VoteExtractionForm({ onResultsReceived }: VoteExtraction
   const [validRenderEndpoint, setValidRenderEndpoint] = useState<string | null>(null)
   const [endpointCheckResults, setEndpointCheckResults] = useState<any[]>([])
 
+  // Fonction pour vérifier l'état de l'API Render
+  const checkRenderApiStatus = useCallback(async () => {
+    setIsWarmingUp(true)
+    try {
+      // Ajouter un paramètre de cache-buster pour éviter les réponses en cache
+      const timestamp = new Date().getTime()
+      const result = await warmupRenderApi(`?cache=${timestamp}`)
+
+      // Ajouter plus de détails sur l'erreur
+      let errorDetails = ""
+      if (result.status === "error" || !result.success) {
+        errorDetails = result.errorDetails || result.message || "Erreur inconnue"
+      }
+
+      // Vérifier si le service est en maintenance (503)
+      const isMaintenanceMode = isServiceUnavailable(result.statusCode || 0)
+
+      setRenderApiStatus({
+        status: result.success
+          ? "active"
+          : isMaintenanceMode
+            ? "maintenance"
+            : result.statusMessage === "starting"
+              ? "starting"
+              : result.status === "error"
+                ? "error"
+                : "inactive",
+        message: result.message + (errorDetails ? ` (Détails: ${errorDetails})` : ""),
+        lastChecked: new Date(),
+        statusCode: result.statusCode || 0,
+      })
+    } catch (error: unknown) {
+      setRenderApiStatus({
+        status: "error",
+        message: error instanceof Error ? error.message : String(error),
+        lastChecked: new Date(),
+        statusCode: 0,
+      })
+    } finally {
+      setIsWarmingUp(false)
+    }
+  }, [])
+
   // Vérifier que la clé publique est disponible au chargement du composant
   useEffect(() => {
     async function checkPublicKey() {
@@ -359,7 +402,7 @@ Résultats: ${JSON.stringify(allResults, null, 2)}`,
     return () => {
       if (retryTimer) clearTimeout(retryTimer)
     }
-  }, [autoRetry, renderApiStatus.status, retryCount, checkRenderApiStatus])
+  }, [autoRetry, renderApiStatus.status, retryCount])
 
   // Ajouter cette fonction pour vérifier l'état de l'extraction
   const checkExtractionStatus = useCallback(
@@ -435,49 +478,6 @@ Résultats: ${JSON.stringify(allResults, null, 2)}`,
       }
     }
   }, [extractionId, checkExtractionStatus])
-
-  // Fonction pour vérifier l'état de l'API Render
-  const checkRenderApiStatus = useCallback(async () => {
-    setIsWarmingUp(true)
-    try {
-      // Ajouter un paramètre de cache-buster pour éviter les réponses en cache
-      const timestamp = new Date().getTime()
-      const result = await warmupRenderApi(`?cache=${timestamp}`)
-
-      // Ajouter plus de détails sur l'erreur
-      let errorDetails = ""
-      if (result.status === "error" || !result.success) {
-        errorDetails = result.errorDetails || result.message || "Erreur inconnue"
-      }
-
-      // Vérifier si le service est en maintenance (503)
-      const isMaintenanceMode = isServiceUnavailable(result.statusCode || 0)
-
-      setRenderApiStatus({
-        status: result.success
-          ? "active"
-          : isMaintenanceMode
-            ? "maintenance"
-            : result.statusMessage === "starting"
-              ? "starting"
-              : result.status === "error"
-                ? "error"
-                : "inactive",
-        message: result.message + (errorDetails ? ` (Détails: ${errorDetails})` : ""),
-        lastChecked: new Date(),
-        statusCode: result.statusCode || 0,
-      })
-    } catch (error: unknown) {
-      setRenderApiStatus({
-        status: "error",
-        message: error instanceof Error ? error.message : String(error),
-        lastChecked: new Date(),
-        statusCode: 0,
-      })
-    } finally {
-      setIsWarmingUp(false)
-    }
-  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
