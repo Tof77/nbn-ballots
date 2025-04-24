@@ -4,13 +4,6 @@ import { v4 as uuidv4 } from "uuid"
 // Définir le runtime Node.js pour cette route API
 export const runtime = "nodejs"
 
-// Définir l'interface pour les données d'erreur
-interface ErrorData {
-  error: string
-  details?: string
-  status?: number
-}
-
 export async function POST(req: NextRequest): Promise<Response> {
   try {
     // Récupérer les données depuis le corps de la requête
@@ -34,9 +27,8 @@ export async function POST(req: NextRequest): Promise<Response> {
     const renderApiUrl = process.env.RENDER_API_URL || "https://nbn-ballots-api.onrender.com"
     console.log(`URL de l'API Render: ${renderApiUrl}`)
 
-    // Construire l'URL complète - Essayer différents endpoints possibles
-    // Modifier cette ligne pour utiliser l'endpoint correct
-    const extractionEndpoint = `${renderApiUrl}/api/extract-votes` // Essayer avec /api/ préfixe
+    // Construire l'URL complète - Essayer avec le préfixe /api/
+    const extractionEndpoint = `${renderApiUrl}/api/extract-votes`
     console.log(`URL complète de l'endpoint d'extraction: ${extractionEndpoint}`)
 
     // Construire l'URL de callback
@@ -76,75 +68,11 @@ export async function POST(req: NextRequest): Promise<Response> {
         const responseText = await renderResponse.text()
         console.error("Corps de la réponse:", responseText.substring(0, 500))
 
-        // Si c'est une erreur 404, essayer avec un autre endpoint
-        if (renderResponse.status === 404) {
-          // Essayer avec un autre endpoint
-          const alternativeEndpoint = `${renderApiUrl}/api/extract-votes`
-          if (alternativeEndpoint !== extractionEndpoint) {
-            console.log(`Tentative avec un endpoint alternatif: ${alternativeEndpoint}`)
-
-            const alternativeResponse = await fetch(alternativeEndpoint, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify(renderRequestData),
-            })
-
-            if (alternativeResponse.ok) {
-              // Si ça fonctionne, lire la réponse et la retourner
-              const alternativeData = await alternativeResponse.json()
-              console.log("Réponse de l'endpoint alternatif:", alternativeData)
-
-              return NextResponse.json({
-                extractionId,
-                message: "Extraction démarrée avec succès (endpoint alternatif)",
-                renderResponse: alternativeData,
-                alternativeEndpoint,
-              })
-            } else {
-              // Si ça ne fonctionne toujours pas, ajouter cette information à l'erreur
-              const alternativeText = await alternativeResponse.text()
-              console.error("Corps de la réponse alternative:", alternativeText.substring(0, 500))
-
-              return NextResponse.json(
-                {
-                  error: "Les endpoints d'extraction ne sont pas disponibles",
-                  details: "Ni l'endpoint principal ni l'endpoint alternatif n'ont fonctionné",
-                  originalEndpoint: extractionEndpoint,
-                  alternativeEndpoint,
-                  originalStatus: renderResponse.status,
-                  alternativeStatus: alternativeResponse.status,
-                  originalResponse: responseText.substring(0, 200),
-                  alternativeResponse: alternativeText.substring(0, 200),
-                  suggestion: "Utilisez /api/render-endpoints pour découvrir les endpoints disponibles",
-                },
-                { status: 404 },
-              )
-            }
-          }
-        }
-
-        // Essayer de parser comme JSON si possible
-        let errorData: ErrorData = { error: `Erreur HTTP ${renderResponse.status}` }
-        try {
-          if (responseText.trim().startsWith("{")) {
-            errorData = JSON.parse(responseText) as ErrorData
-          } else {
-            // Si ce n'est pas du JSON, ajouter le texte brut comme détail
-            errorData.details = responseText.substring(0, 200) + (responseText.length > 200 ? "..." : "")
-          }
-        } catch (parseError) {
-          console.error("Impossible de parser la réponse comme JSON:", parseError)
-          errorData.details = responseText.substring(0, 200) + (responseText.length > 200 ? "..." : "")
-        }
-
         return NextResponse.json(
           {
-            error: errorData.error || `Erreur HTTP ${renderResponse.status} lors de la connexion à l'API d'extraction`,
-            details: errorData.details,
+            error: `Erreur HTTP ${renderResponse.status} lors de la connexion à l'API d'extraction`,
+            details: responseText.substring(0, 200) + (responseText.length > 200 ? "..." : ""),
             status: renderResponse.status,
-            suggestion: "Utilisez /api/render-endpoints pour découvrir les endpoints disponibles",
           },
           { status: 500 },
         )
@@ -216,7 +144,6 @@ export async function POST(req: NextRequest): Promise<Response> {
             details: error.message,
             renderApiUrl,
             extractionEndpoint,
-            suggestion: "Utilisez /api/render-endpoints pour découvrir les endpoints disponibles",
           },
           { status: 503 },
         ) // Service Unavailable
@@ -226,7 +153,6 @@ export async function POST(req: NextRequest): Promise<Response> {
         {
           error: `Erreur lors de la connexion à l'API d'extraction: ${error.message}`,
           details: error.stack,
-          suggestion: "Utilisez /api/render-endpoints pour découvrir les endpoints disponibles",
         },
         { status: 500 },
       )
