@@ -6,13 +6,18 @@ export const runtime = "nodejs"
 
 export async function POST(req: NextRequest): Promise<Response> {
   try {
-    // Récupérer les identifiants depuis le corps de la requête
-    const { username, password } = await req.json()
+    // Récupérer les données depuis le corps de la requête
+    const requestData = await req.json()
+    const { credentials, commissionId, startDate, extractDetails } = requestData
 
     // Valider les identifiants
-    if (!username || !password) {
-      return NextResponse.json({ error: "Nom d'utilisateur et mot de passe requis" }, { status: 400 })
+    if (!credentials || !credentials.encryptedUsername || !credentials.encryptedPassword) {
+      return NextResponse.json({ error: "Identifiants chiffrés requis" }, { status: 400 })
     }
+
+    // Utiliser les identifiants chiffrés ou déchiffrés selon ce qui est disponible
+    const username = credentials.username || credentials.encryptedUsername
+    const password = credentials.password || credentials.encryptedPassword
 
     // Générer un ID unique pour cette extraction
     const extractionId = uuidv4()
@@ -34,6 +39,9 @@ export async function POST(req: NextRequest): Promise<Response> {
         body: JSON.stringify({
           username,
           password,
+          commissionId,
+          startDate,
+          extractDetails,
           extractionId,
           callbackUrl:
             process.env.VERCEL_CALLBACK_URL ||
